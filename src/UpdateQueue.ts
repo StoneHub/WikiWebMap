@@ -1,9 +1,5 @@
 import { GraphManager, Node, Link } from './GraphManager';
 
-interface QueuedUpdate {
-  nodes: Node[];
-  links: Link[];
-}
 
 /**
  * UpdateQueue - Batches graph updates to prevent rapid D3 recreation
@@ -12,7 +8,7 @@ interface QueuedUpdate {
 export class UpdateQueue {
   private graphManager: GraphManager;
   private batchInterval: number;
-  private timer: NodeJS.Timeout | null = null;
+  private timer: ReturnType<typeof setTimeout> | null = null;
 
   private nodeQueue: Node[] = [];
   private linkQueue: Link[] = [];

@@ -41,12 +41,12 @@ export interface NodeMetadata {
  */
 export class GraphManager {
   private svg: d3.Selection<SVGSVGElement, unknown, null, undefined>;
-  private g: d3.Selection<SVGGElement, unknown, null, undefined>;
-  private linksGroup: d3.Selection<SVGGElement, unknown, null, undefined>;
-  private nodesGroup: d3.Selection<SVGGElement, unknown, null, undefined>;
-  private defs: d3.Selection<SVGDefsElement, unknown, null, undefined>;
+  private g!: d3.Selection<SVGGElement, unknown, null, undefined>;
+  private linksGroup!: d3.Selection<SVGGElement, unknown, null, undefined>;
+  private nodesGroup!: d3.Selection<SVGGElement, unknown, null, undefined>;
+  private defs!: d3.Selection<SVGDefsElement, unknown, null, undefined>;
 
-  private simulation: d3.Simulation<Node, Link>;
+  private simulation!: d3.Simulation<Node, Link>;
   private nodes: Node[] = [];
   private links: Link[] = [];
 
@@ -61,7 +61,6 @@ export class GraphManager {
   // Drag state
   private dragThreshold = 5;
   private dragStartPos: { x: number; y: number } | null = null;
-  private isDragging = false;
 
   constructor(svgElement: SVGSVGElement, callbacks: GraphCallbacks = {}) {
     this.svg = d3.select(svgElement);
@@ -70,6 +69,13 @@ export class GraphManager {
     const rect = svgElement.getBoundingClientRect();
     this.width = rect.width;
     this.height = rect.height;
+
+    console.log(`[GraphManager] SVG dimensions: ${this.width}x${this.height}`);
+
+    if (this.width === 0 || this.height === 0) {
+      console.error('[GraphManager] SVG has zero dimensions! Cannot render.');
+      return;
+    }
 
     this.initializeSVG();
     this.initializeSimulation();
@@ -102,15 +108,16 @@ export class GraphManager {
   private initializeSimulation() {
     this.simulation = d3.forceSimulation<Node>(this.nodes)
       .force('link', d3.forceLink<Node, Link>(this.links)
-        .id(d => d.id)
+        .id((d: any) => d.id)
         .distance(this.nodeSpacing))
       .force('charge', d3.forceManyBody().strength(-200))
       .force('center', d3.forceCenter(this.width / 2, this.height / 2))
-      .force('collision', d3.forceCollide().radius((d: Node) => {
+      .force('collision', d3.forceCollide().radius((d: any) => {
+        const node = d as Node;
         // Dynamic collision based on connection count
         const connections = this.links.filter(l =>
-          (typeof l.source === 'object' ? l.source.id : l.source) === d.id ||
-          (typeof l.target === 'object' ? l.target.id : l.target) === d.id
+          (typeof l.source === 'object' ? l.source.id : l.source) === node.id ||
+          (typeof l.target === 'object' ? l.target.id : l.target) === node.id
         ).length;
         return Math.min(30 + connections * 0.5, 60) + 15;
       }))
@@ -125,6 +132,10 @@ export class GraphManager {
 
     newNodes.forEach(node => {
       if (!this.nodes.find(n => n.id === node.id)) {
+        // Give node initial random position if not set
+        if (node.x === undefined) node.x = this.width / 2 + (Math.random() - 0.5) * 100;
+        if (node.y === undefined) node.y = this.height / 2 + (Math.random() - 0.5) * 100;
+
         this.nodes.push(node);
         added++;
 
@@ -282,6 +293,8 @@ export class GraphManager {
    * Update DOM - D3 join pattern
    */
   private updateDOM() {
+    console.log(`[GraphManager] updateDOM called - ${this.nodes.length} nodes, ${this.links.length} links`);
+
     // Update image patterns in defs
     this.updateImagePatterns();
 
@@ -290,6 +303,9 @@ export class GraphManager {
 
     // Update nodes
     this.updateNodes();
+
+    // Force initial tick to position elements
+    this.onTick();
   }
 
   private updateImagePatterns() {
@@ -363,6 +379,8 @@ export class GraphManager {
       .selectAll('g')
       .data(this.nodes, (d: any) => d.id);
 
+    console.log(`[GraphManager] updateNodes - enter: ${nodeGroups.enter().size()}, update: ${nodeGroups.size()}, exit: ${nodeGroups.exit().size()}`);
+
     // Enter
     const enter = nodeGroups.enter()
       .append('g')
@@ -377,7 +395,7 @@ export class GraphManager {
 
     merged.each((d, i, nodes) => {
       const group = d3.select(nodes[i]);
-      const meta = this.nodeMetadata.get(d.id) || {};
+      const meta: Partial<NodeMetadata> = this.nodeMetadata.get(d.id) || {};
 
       // Calculate radius based on connections
       const connections = this.links.filter(l => {
@@ -426,7 +444,7 @@ export class GraphManager {
     nodeGroups.exit().remove();
   }
 
-  private getNodeColor(nodeId: string, meta: NodeMetadata): string {
+  private getNodeColor(_nodeId: string, meta: Partial<NodeMetadata>): string {
     if (meta.isInPath) return '#00ff88'; // Green for path
     if (meta.isCurrentlyExploring) return '#ffdd00'; // Yellow for currently exploring
     if (meta.isSelected) return '#ff8800'; // Orange for selected
@@ -436,21 +454,21 @@ export class GraphManager {
     return '#0088ff'; // Default blue
   }
 
-  private getNodeStroke(meta: NodeMetadata): string {
+  private getNodeStroke(meta: Partial<NodeMetadata>): string {
     if (meta.isSelected) return '#ffff00'; // Yellow stroke for selected
     if (meta.isCurrentlyExploring) return '#ff6600'; // Orange stroke for exploring
     if (meta.isExpanded) return '#00ffff'; // Cyan for expanded
     return '#fff';
   }
 
-  private getNodeStrokeWidth(meta: NodeMetadata): number {
+  private getNodeStrokeWidth(meta: Partial<NodeMetadata>): number {
     if (meta.isCurrentlyExploring) return 4;
     if (meta.isSelected) return 3;
     if (meta.isExpanded) return 3;
     return 2;
   }
 
-  private addTextLabel(group: d3.Selection<SVGGElement, Node, any, any>, title: string) {
+  private addTextLabel(group: d3.Selection<SVGGElement, any, any, any>, title: string) {
     const textElement = group.append('text')
       .attr('text-anchor', 'middle')
       .attr('fill', '#ffffff')
@@ -497,7 +515,6 @@ export class GraphManager {
     return d3.drag<SVGGElement, Node>()
       .on('start', (event, d) => {
         this.dragStartPos = { x: event.x, y: event.y };
-        this.isDragging = false;
 
         if (!event.active) this.simulation.alphaTarget(0.3).restart();
         d.fx = d.x;
@@ -515,7 +532,6 @@ export class GraphManager {
         const distance = Math.sqrt(dx * dx + dy * dy);
 
         if (distance > this.dragThreshold) {
-          this.isDragging = true;
           event.sourceEvent.preventDefault();
           d.fx = event.x;
           d.fy = event.y;
@@ -543,7 +559,6 @@ export class GraphManager {
         d.fx = null;
         d.fy = null;
         this.dragStartPos = null;
-        this.isDragging = false;
       });
   }
 
