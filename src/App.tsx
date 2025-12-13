@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from 'react';
 import { GraphManager, Node as GraphNode, Link } from './GraphManager';
 import { UpdateQueue } from './UpdateQueue';
 import { WikiService, LinkWithContext } from './WikiService';
-import { connectionLogger } from './ConnectionLogger';
 import './index.css';
 
 const WikiWebExplorer = () => {
@@ -22,9 +21,8 @@ const WikiWebExplorer = () => {
   const [pathNodes, setPathNodes] = useState(new Set<string>());
   const [userTypedNodes, setUserTypedNodes] = useState(new Set<string>());
   const [autoDiscoveredNodes, setAutoDiscoveredNodes] = useState(new Set<string>());
-  const [recentlyAddedNodes, setRecentlyAddedNodes] = useState(new Set<string>());
+  const [recentlyAddedNodes] = useState(new Set<string>());
   const [expandedNodes, setExpandedNodes] = useState(new Set<string>());
-  const [isOverTrash, setIsOverTrash] = useState(false);
   const [nodeThumbnails, setNodeThumbnails] = useState<Record<string, string>>({});
 
   // Search Progress State
@@ -64,7 +62,6 @@ const WikiWebExplorer = () => {
         if (isOverTrash) {
           deleteNodeImperative(node.id);
         }
-        setIsOverTrash(false);
       },
       onStatsUpdate: (stats) => {
         setNodeCount(stats.nodeCount);

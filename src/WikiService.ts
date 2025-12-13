@@ -1,6 +1,6 @@
-import { GraphManager } from './GraphManager';
 
-const CACHE_KEY = 'wiki-cache-v1';
+
+
 
 export interface LinkWithContext {
     title: string;
@@ -17,6 +17,7 @@ export interface SummaryData {
     extract: string;
     description: string;
     thumbnail: string;
+    summary: string;
 }
 
 export class WikiService {
@@ -122,8 +123,7 @@ export class WikiService {
                 // Extract Context: The sentence containing this link.
                 // Simple regex split on sentences?
                 const textContent = p.textContent || '';
-                // Escape special chars for regex
-                const escapedLinkText = linkText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
                 // Find sentence: look for [.?!] followed by space or end, containing the link text
                 // This is tricky. Simplified: take a window around the link.
                 // Or just split by sentences and find the one with the link.
