@@ -1,13 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import { GraphManager, Node as GraphNode, Link } from './GraphManager';
 import { UpdateQueue } from './UpdateQueue';
-import { WikiService } from './WikiService';
+import { WikiService, LinkWithContext } from './WikiService';
 import { connectionLogger } from './ConnectionLogger';
-import LogPanel from './components/LogPanel';
 import './index.css';
 
 const WikiWebExplorer = () => {
-  // UI state only
+  // UI state
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -16,6 +15,7 @@ const WikiWebExplorer = () => {
   const [nodeCount, setNodeCount] = useState<number>(0);
   const [linkCount, setLinkCount] = useState<number>(0);
   const [clickedNode, setClickedNode] = useState<GraphNode | null>(null);
+  const [clickedLink, setClickedLink] = useState<Link | null>(null);
   const [clickedSummary, setClickedSummary] = useState('');
   const [clickedThumbnail, setClickedThumbnail] = useState('');
   const [selectedNodes, setSelectedNodes] = useState<GraphNode[]>([]);
@@ -26,6 +26,8 @@ const WikiWebExplorer = () => {
   const [expandedNodes, setExpandedNodes] = useState(new Set<string>());
   const [isOverTrash, setIsOverTrash] = useState(false);
   const [nodeThumbnails, setNodeThumbnails] = useState<Record<string, string>>({});
+
+  // Search Progress State
   const [searchProgress, setSearchProgress] = useState({
     isSearching: false,
     currentDepth: 0,
@@ -35,6 +37,10 @@ const WikiWebExplorer = () => {
     queueSize: 0,
     exploredNodes: new Set<string>(),
   });
+  const [searchLog, setSearchLog] = useState<string[]>([]); // Granular log
+
+  // Settings Visibility
+  const [showSettings, setShowSettings] = useState(false);
 
   // Refs
   const svgRef = useRef<SVGSVGElement>(null);
@@ -44,20 +50,18 @@ const WikiWebExplorer = () => {
 
   // Visual settings
   const [nodeSpacing, setNodeSpacing] = useState(150);
-  const [searchDepth, setSearchDepth] = useState(2); // Depth for purple node branching during search
+  const [searchDepth, setSearchDepth] = useState(2);
 
-  // Initialize GraphManager once
+  // Initialize GraphManager
   useEffect(() => {
     if (!svgRef.current || graphManagerRef.current) return;
-
-    console.log('[GraphManager] Initializing...');
 
     graphManagerRef.current = new GraphManager(svgRef.current, {
       onNodeClick: (node, event) => handleNodeClick(event as any, node),
       onNodeDoubleClick: (node, event) => handleNodeDoubleClick(event as any, node),
+      onLinkClick: (link, event) => handleLinkClick(event as any, link),
       onNodeDragEnd: (node, isOverTrash) => {
         if (isOverTrash) {
-          console.log(`[Drag] 🗑️ Node "${node.id}" dropped on trash`);
           deleteNodeImperative(node.id);
         }
         setIsOverTrash(false);
@@ -69,8 +73,6 @@ const WikiWebExplorer = () => {
     });
 
     updateQueueRef.current = new UpdateQueue(graphManagerRef.current, 500);
-
-    console.log('[GraphManager] Initialized successfully');
 
     return () => {
       if (graphManagerRef.current) {
@@ -84,14 +86,14 @@ const WikiWebExplorer = () => {
     };
   }, []);
 
-  // Update node spacing when slider changes
+  // Sync settings
   useEffect(() => {
     if (graphManagerRef.current) {
       graphManagerRef.current.setNodeSpacing(nodeSpacing);
     }
   }, [nodeSpacing]);
 
-  // Sync node metadata to GraphManager when sets change
+  // Sync node metadata
   useEffect(() => {
     if (!graphManagerRef.current) return;
 
@@ -133,130 +135,94 @@ const WikiWebExplorer = () => {
     nodeThumbnails,
   ]);
 
-  // -- Refactored to use WikiService --
+  // -- Actions --
 
-  // Add topic to graph with auto-connection to existing nodes
-  const addTopic = async (title: string) => {
+  const addTopic = async (title: string, silent = false) => {
     if (!title.trim()) {
       setError('Please enter a topic');
       return;
     }
 
-    if (!updateQueueRef.current) {
-      console.error('UpdateQueue not initialized');
-      return;
-    }
+    if (!updateQueueRef.current) return;
 
-    setLoading(true);
+    if (!silent) setLoading(true);
     setError('');
 
     try {
-      const links = await WikiService.fetchLinks(title);
-
-      // Fetch thumbnail for the user-typed node
-      const summaryData = await WikiService.fetchSummary(title);
+      const resolvedTitle = await WikiService.resolveTitle(title);
+      const links = await WikiService.fetchLinks(resolvedTitle);
+      const summaryData = await WikiService.fetchSummary(resolvedTitle);
       if (summaryData.thumbnail) {
-        setNodeThumbnails(prev => ({ ...prev, [title]: summaryData.thumbnail! }));
+        setNodeThumbnails(prev => ({ ...prev, [resolvedTitle]: summaryData.thumbnail! }));
       }
 
-      // Mark this as a user-typed node
-      setUserTypedNodes(prev => new Set([...prev, title]));
+      setUserTypedNodes(prev => new Set([...prev, resolvedTitle]));
 
-      // Prepare nodes and links
-      const newNodes: GraphNode[] = [{ id: title, title }];
+      const newNodes: GraphNode[] = [{ id: resolvedTitle, title: resolvedTitle }];
       const newLinks: Link[] = [];
       const newAutoDiscovered = new Set<string>();
 
-      // Add links from new topic to its connected pages (as auto-discovered)
-      links.forEach((link: string) => {
-        newNodes.push({ id: link, title: link });
-        newAutoDiscovered.add(link);
-        newLinks.push({ source: title, target: link });
-        connectionLogger.log(title, link, 'manual');
+      links.forEach((linkObj: LinkWithContext) => {
+        newNodes.push({ id: linkObj.title, title: linkObj.title });
+        newAutoDiscovered.add(linkObj.title);
+        newLinks.push({
+          source: resolvedTitle,
+          target: linkObj.title,
+          type: 'manual',
+          context: linkObj.context
+        });
       });
 
-      // Update auto-discovered nodes
       setAutoDiscoveredNodes(prev => new Set([...prev, ...newAutoDiscovered]));
 
-      // Auto-connect: check if existing nodes link to this new topic
-      const stats = graphManagerRef.current?.getStats();
-      if (stats && stats.nodeCount > 0) {
-        // Check cached links for existing nodes for reverse connections
-        WikiService.getCachedNodes().forEach(existingNodeId => {
-          const cachedLinks = WikiService.getLinksFromCache(existingNodeId);
-          if (cachedLinks && cachedLinks.includes(title)) {
-            // Avoid duplicates if graph already has it? GraphManager handles idempotency mostly
-            newLinks.push({ source: existingNodeId, target: title });
-            connectionLogger.log(existingNodeId, title, 'auto');
-          }
-        });
-      }
+      // Auto-connect existing
+      const cachedNodes = WikiService.getCachedNodes();
+      cachedNodes.forEach(existingNodeId => {
+        const cachedLinks = WikiService.getLinksFromCache(existingNodeId);
+        const match = cachedLinks?.find(l => l.title === resolvedTitle);
+        if (match) {
+          newLinks.push({
+            source: existingNodeId,
+            target: resolvedTitle,
+            type: 'auto',
+            context: match.context
+          });
+        }
+      });
 
-
-      // Queue the update
       updateQueueRef.current.queueUpdate(newNodes, newLinks);
+      if (!silent) setSearchTerm('');
 
-      setSearchTerm('');
+      return resolvedTitle;
     } catch (err: any) {
       console.error('Add topic error:', err);
       setError(err.message || 'Failed to fetch Wikipedia data');
+      throw err;
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
-  // Cancel search
-  const cancelSearch = () => {
-    console.log('[PathFinder] 🛑 Search cancelled by user');
-    searchAbortRef.current = true;
-    setError('Search cancelled');
-  };
-
-  // Delete node using GraphManager
   const deleteNodeImperative = (nodeId: string) => {
-    console.log(`[Delete] 🗑️ Deleting node "${nodeId}"`);
-
     if (graphManagerRef.current) {
       graphManagerRef.current.deleteNode(nodeId);
     }
 
-    // Clean up from React state sets
-    setUserTypedNodes(prev => {
-      const updated = new Set(prev);
-      updated.delete(nodeId);
-      return updated;
-    });
-    setAutoDiscoveredNodes(prev => {
-      const updated = new Set(prev);
-      updated.delete(nodeId);
-      return updated;
-    });
-    setExpandedNodes(prev => {
-      const updated = new Set(prev);
-      updated.delete(nodeId);
-      return updated;
-    });
-    setPathNodes(prev => {
-      const updated = new Set(prev);
-      updated.delete(nodeId);
-      return updated;
-    });
+    setUserTypedNodes(prev => { const s = new Set(prev); s.delete(nodeId); return s; });
+    setAutoDiscoveredNodes(prev => { const s = new Set(prev); s.delete(nodeId); return s; });
+    setExpandedNodes(prev => { const s = new Set(prev); s.delete(nodeId); return s; });
+    setPathNodes(prev => { const s = new Set(prev); s.delete(nodeId); return s; });
 
-    // Clear clicked node if it was deleted
     if (clickedNode?.id === nodeId) {
       setClickedNode(null);
     }
   };
 
-  // Prune graph (remove leaf nodes)
   const pruneGraph = () => {
-    console.log('[Prune] ✂️ Pruning graph...');
     if (graphManagerRef.current) {
       const deletedCount = graphManagerRef.current.pruneNodes();
-      console.log(`[Prune] Deleted ${deletedCount} nodes`);
       if (deletedCount > 0) {
         setError(`Pruned ${deletedCount} isolated nodes`);
-        // Clear error message after 3 seconds
         setTimeout(() => setError(''), 3000);
       } else {
         setError('No isolated nodes found to prune');
@@ -265,11 +231,36 @@ const WikiWebExplorer = () => {
     }
   };
 
-  // Clean BFS pathfinding - only loads nodes on success
-  const findPath = async (startTitle: string, endTitle: string) => {
-    console.log(`[PathFinder] 🔍 Starting CLEAN path search: "${startTitle}" -> "${endTitle}"`);
+  const cancelSearch = () => {
+    searchAbortRef.current = true;
+    setError('Search cancelled');
+    setSearchLog(prev => [...prev, `[USER] Abort command received.`]);
+    setTimeout(() => {
+      setSearchProgress(prev => ({ ...prev, isSearching: false }));
+      setSelectedNodes([]);
+    }, 1000);
+  }
 
-    // Reset state
+  const findPath = async (startInput: string, endInput: string) => {
+    // 1. Resolve Titles (Robustness Fix)
+    setLoading(true);
+    setSearchLog(['Initializing PathFinder protocol...']);
+    let startTitle = startInput;
+    let endTitle = endInput;
+
+    try {
+      setSearchLog(prev => [...prev, `Resolving targets: "${startInput}" / "${endInput}"`]);
+      const [rStart, rEnd] = await Promise.all([
+        WikiService.resolveTitle(startInput),
+        WikiService.resolveTitle(endInput)
+      ]);
+      startTitle = rStart;
+      endTitle = rEnd;
+      setSearchLog(prev => [...prev, `Target Lock: "${startTitle}" → "${endTitle}"`]);
+    } catch (e) {
+      setSearchLog(prev => [...prev, `Resolution warning. Proceeding with raw inputs.`]);
+    }
+
     setSearchProgress({
       isSearching: true,
       currentDepth: 0,
@@ -279,60 +270,46 @@ const WikiWebExplorer = () => {
       queueSize: 1,
       exploredNodes: new Set([startTitle])
     });
-    setLoading(true);
     setPathNodes(new Set());
     setError('');
     searchAbortRef.current = false;
 
-    // Internal BFS State
     const queue: { title: string; depth: number }[] = [{ title: startTitle, depth: 0 }];
     const visited = new Set<string>([startTitle]);
-    const parentMap = new Map<string, string>(); // child -> parent
-
+    const parentMap = new Map<string, string>();
     let nodesExplored = 0;
-    const MAX_NODES = 500; // Safety limit
-    const startTime = Date.now();
 
     try {
       while (queue.length > 0) {
-        if (searchAbortRef.current) {
-          console.log('[PathFinder] 🛑 Search aborted by user');
-          break;
-        }
-
+        if (searchAbortRef.current) break;
         const { title, depth } = queue.shift()!;
 
-        // Update progress UI sporadically
         nodesExplored++;
+        // Granular Log Update
+        if (nodesExplored % 3 === 0) {
+          setSearchLog(prev => {
+            const newLogs = [...prev, `Scanning: ${title.substring(0, 20)}... (D${depth})`];
+            return newLogs.slice(-8); // Keep last 8 lines
+          });
+        }
+
         if (nodesExplored % 5 === 0) {
-          setSearchProgress(prev => ({
-            ...prev,
-            exploredCount: nodesExplored,
-            currentDepth: depth,
-            currentPage: title,
-            queueSize: queue.length
-          }));
-          // Yield to UI
+          setSearchProgress(prev => ({ ...prev, exploredCount: nodesExplored, currentDepth: depth, currentPage: title, queueSize: queue.length }));
           await new Promise(r => setTimeout(r, 0));
         }
 
         if (depth >= 6) continue;
-        if (nodesExplored > MAX_NODES) {
-          throw new Error(`Exceeded exploration limit (${MAX_NODES} nodes) without finding target.`);
-        }
+        if (nodesExplored > 500) throw new Error(`Exceeded exploration limit (500 nodes).`);
 
-        // Fetch links
         const links = await WikiService.fetchLinks(title);
 
-        for (const link of links) {
+        for (const linkObj of links) {
+          const link = linkObj.title;
           if (visited.has(link)) continue;
 
-          // Found?
           if (link === endTitle) {
-            console.log(`[PathFinder] 🎉 FOUND PATH!`);
+            setSearchLog(prev => [...prev, `>> TARGET ACQUIRED: ${link} <<`]);
             parentMap.set(link, title);
-
-            // Reconstruct Path
             const path: string[] = [endTitle];
             let curr = endTitle;
             while (curr !== startTitle) {
@@ -342,38 +319,30 @@ const WikiWebExplorer = () => {
             }
             console.log('[PathFinder] Path:', path.join(' -> '));
 
-            // Add path nodes to graph
             const newNodes = path.map(p => ({ id: p, title: p }));
-
-            // Add path links
             const newLinks: Link[] = [];
             for (let i = 0; i < path.length - 1; i++) {
-              newLinks.push({ source: path[i], target: path[i + 1] });
-              // Log valid connection
-              connectionLogger.log(path[i], path[i + 1], 'path');
+              const source = path[i];
+              const target = path[i + 1];
+              const sourceLinks = WikiService.getLinksFromCache(source);
+              const context = sourceLinks?.find(l => l.title === target)?.context;
+              newLinks.push({ source, target, type: 'path', context });
             }
 
-            // Update GraphManager
             if (graphManagerRef.current) {
               graphManagerRef.current.addNodes(newNodes);
               graphManagerRef.current.addLinks(newLinks);
-
-              // Sets metadata for path highlighting
               setPathNodes(new Set(path));
 
-              const updates = path.map(p => ({
-                nodeId: p,
-                metadata: { isInPath: true }
-              }));
+              const updates = path.map(p => ({ nodeId: p, metadata: { isInPath: true } }));
               graphManagerRef.current.setNodesMetadata(updates);
-
-              // Force highight path nodes (undim them if dimmed)
-              graphManagerRef.current.highlightNode(null); // Reset global dim
+              graphManagerRef.current.highlightNode(null);
             }
 
+            setSelectedNodes([]);
             setSearchProgress(prev => ({ ...prev, isSearching: false }));
             setLoading(false);
-            return; // Done
+            return;
           }
 
           visited.add(link);
@@ -381,257 +350,204 @@ const WikiWebExplorer = () => {
           queue.push({ title: link, depth: depth + 1 });
         }
       }
-
-      // If loop finishes without return -> Not Found or Aborted
       if (!searchAbortRef.current) {
         setError('No path found within search limits.');
+        setSearchLog(prev => [...prev, `[FAILURE] Target not found in search horizon.`]);
       }
-
     } catch (err: any) {
-      console.error('[PathFinder] Error:', err);
       setError(err.message || 'Error during pathfinding');
+      setSearchLog(prev => [...prev, `[ERROR] ${err.message}`]);
     } finally {
       setLoading(false);
       setSearchProgress(prev => ({ ...prev, isSearching: false }));
     }
   };
 
+  // --- Auto-Test Feature ---
+  const runAutoTest = async () => {
+    // 1. Close settings so user can see the main UI
+    setShowSettings(false);
 
+    console.log('[AutoTest] 🚀 Starting Auto-Test Protocol (No Confirm)...');
+    if (graphManagerRef.current) graphManagerRef.current.clear();
 
+    // 3. Reset State & Show Terminal
+    setSearchTerm('Auto-Test Running...'); // Visual feedback in input
+    setSearchLog(['[TEST] 🧪 Starting Protocol verify_fix_1...']);
+    setSearchProgress(prev => ({ ...prev, isSearching: true, exploredCount: 0 }));
 
+    try {
+      // 4. Add Start Node
+      setSearchLog(prev => [...prev, '[TEST] Seeding start node: "Facebook"...']);
+      console.log('[AutoTest] Adding start node...');
+      setSearchTerm('Adding: Facebook');
+      const startTitle = await addTopic('Facebook', true);
 
-  // Expand node: fetch and add its links as sub-web
+      // 5. Add End Node (simulated typo)
+      setSearchLog(prev => [...prev, '[TEST] Seeding target node: "The first ammendment" (Typo)...']);
+      console.log('[AutoTest] Adding end node...');
+      setSearchTerm('Adding: The first ammendment');
+      const endTitle = await addTopic('The first ammendment', true);
+
+      if (!startTitle || !endTitle) throw new Error("Failed to seed nodes (API Error?)");
+
+      setSearchLog(prev => [...prev, `[TEST] Nodes seeded. Resolved: "${startTitle}" & "${endTitle}"`]);
+      setSearchTerm('Waiting for Physics...');
+
+      // 6. Wait for Graph to be ready
+      let attempts = 0;
+      const checkGraph = setInterval(() => {
+        attempts++;
+        const hasNodes = graphManagerRef.current?.getStats().nodeCount || 0;
+        console.log(`[AutoTest] Checking graph nodes: ${hasNodes} (Attempt ${attempts})`);
+
+        if (hasNodes >= 2) {
+          clearInterval(checkGraph);
+          setSearchLog(prev => [...prev, '[TEST] Graph ready. Launching Pathfinder...']);
+          console.log('[AutoTest] Graph ready. Starting findPath...');
+          setSearchTerm(`Searching: ${startTitle} -> ${endTitle}`);
+          findPath(startTitle, endTitle);
+        } else if (attempts > 50) { // 10 seconds timeout
+          clearInterval(checkGraph);
+          setSearchLog(prev => [...prev, '[TEST] ❌ Timed out waiting for nodes.']);
+          setError('Auto-Test Timeout: Nodes did not appear.');
+          // Alert removed as requested
+          setSearchProgress(prev => ({ ...prev, isSearching: false }));
+        }
+      }, 200);
+
+    } catch (e: any) {
+      console.error('[AutoTest] Error:', e);
+      setSearchLog(prev => [...prev, `[TEST] ❌ Error: ${e.message}`]);
+      setError(`Auto-Test Error: ${e.message}`);
+      setSearchProgress(prev => ({ ...prev, isSearching: false }));
+    }
+  };
+
   const expandNode = async (title: string) => {
-    console.log(`[Expand] 🌐 Expanding node "${title}"`);
-
-    // Check if already expanded - if so, toggle off
     if (expandedNodes.has(title)) {
-      console.log(`[Expand] ➖ Collapsing "${title}"`);
-      setExpandedNodes(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(title);
-        return newSet;
-      });
-      // Note: We keep the nodes on the graph, just remove the expanded indicator
+      setExpandedNodes(prev => { const s = new Set(prev); s.delete(title); return s; });
       return;
     }
-
-    if (!updateQueueRef.current) {
-      console.error('UpdateQueue not initialized');
-      return;
-    }
-
     setLoading(true);
     try {
-      const links = await WikiService.fetchLinks(title);
-      console.log(`[Expand] ➕ Adding ${links.length} sub-nodes for "${title}"`);
+      const linksWithContext = await WikiService.fetchLinks(title);
+      const existingNodes = WikiService.getCachedNodes();
+      const scores: Record<string, number> = {};
 
+      linksWithContext.forEach(linkObj => {
+        const candidate = linkObj.title;
+        scores[candidate] = 0;
+        if (graphManagerRef.current?.getStats().nodeCount && WikiService.getLinksFromCache(candidate)) scores[candidate] += 50;
+        existingNodes.forEach(existing => {
+          if (existing === title) return;
+          const existingLinks = WikiService.getLinksFromCache(existing);
+          if (existingLinks && existingLinks.some(l => l.title === candidate)) scores[candidate] += 10;
+        });
+      });
+
+      const sortedCandidates = linksWithContext.sort((a, b) => (scores[b.title] || 0) - (scores[a.title] || 0)).slice(0, 15);
       const nodesToAdd: GraphNode[] = [];
       const linksToAdd: Link[] = [];
       const newAutoDiscovered = new Set<string>();
 
-      links.forEach((link: string) => {
+      sortedCandidates.forEach(linkObj => {
+        const link = linkObj.title;
         nodesToAdd.push({ id: link, title: link });
         newAutoDiscovered.add(link);
-        linksToAdd.push({ source: title, target: link });
-        connectionLogger.log(title, link, 'expand');
+        linksToAdd.push({ source: title, target: link, type: 'expand', context: linkObj.context });
+
+        existingNodes.forEach(existing => {
+          const existingLinks = WikiService.getLinksFromCache(existing);
+          const match = existingLinks?.find(l => l.title === link);
+          if (match) linksToAdd.push({ source: existing, target: link, type: 'auto', context: match.context });
+        });
       });
 
-      // Update auto-discovered nodes
-      if (newAutoDiscovered.size > 0) {
-        setAutoDiscoveredNodes(prev => new Set([...prev, ...newAutoDiscovered]));
+      if (nodesToAdd.length === 0) setError('No relevant connections found.');
+      else {
+        if (updateQueueRef.current) updateQueueRef.current.queueUpdate(nodesToAdd, linksToAdd);
+        if (newAutoDiscovered.size > 0) setAutoDiscoveredNodes(prev => new Set([...prev, ...newAutoDiscovered]));
+        setExpandedNodes(prev => new Set([...prev, title]));
       }
-
-      // Queue the update
-      updateQueueRef.current.queueUpdate(nodesToAdd, linksToAdd);
-
-      // Mark as expanded
-      setExpandedNodes(prev => new Set([...prev, title]));
     } catch (err: any) {
-      console.error('[Expand] Error:', err);
       setError(`Failed to expand ${title}`);
     } finally {
       setLoading(false);
     }
   };
 
-  // Smart Expand: Prioritize adding nodes that are already linked to by other nodes in the graph
-  // or that link back to existing nodes (triangulation).
-  const smartExpandNode = async (title: string) => {
-    console.log(`[Smart Expand] 🧠 Analyzing connections for "${title}"`);
-    setLoading(true);
-
-    try {
-      // 1. Get all links from this node
-      const links = await WikiService.fetchLinks(title);
-
-      // 2. Identify which of these potential new nodes are MOST relevant
-      // Relevance score = number of existing nodes that ALSO link to this candidate
-      // OR existing nodes that this candidate links TO (harder to know without fetching)
-
-      // Get all currently visible nodes
-      const existingNodes = WikiService.getCachedNodes();
-
-      // Candidate scores
-      const scores: Record<string, number> = {};
-
-      // A. Check if candidate is already in the graph (Score +100 - immediate connection)
-      // B. Check if existing nodes link to this candidate (Score +10 per connection)
-
-      links.forEach(candidate => {
-        scores[candidate] = 0;
-
-        // If already in graph, it's a direct link we missed? (Usually auto-added, but good to ensure)
-        if (graphManagerRef.current?.getStats().nodeCount) {
-          // Logic to check if node exists in D3 is needed, or use our sets
-          // We can check if `cache[candidate]` exists, meaning we visited it.
-          if (WikiService.getLinksFromCache(candidate)) {
-            scores[candidate] += 100;
-          }
-        }
-
-        // Check reverse connections from other existing nodes
-        existingNodes.forEach(existing => {
-          if (existing === title) return;
-          const existingLinks = WikiService.getLinksFromCache(existing);
-          if (existingLinks && existingLinks.includes(candidate)) {
-            scores[candidate] += 10;
-          }
-        });
-      });
-
-      // Filter to top candidates
-      const sortedCandidates = links
-        .sort((a, b) => (scores[b] || 0) - (scores[a] || 0))
-        .slice(0, 15); // Take top 15 most relevant
-
-      console.log(`[Smart Expand] Top candidates for ${title}:`, sortedCandidates.map(c => `${c} (${scores[c]})`));
-
-      // Add them
-      const nodesToAdd: GraphNode[] = [];
-      const linksToAdd: Link[] = [];
-      const newAutoDiscovered = new Set<string>();
-
-      sortedCandidates.forEach(link => {
-        // Add node
-        nodesToAdd.push({ id: link, title: link });
-        newAutoDiscovered.add(link);
-
-        // Add link from source
-        linksToAdd.push({ source: title, target: link });
-        connectionLogger.log(title, link, 'expand', scores[link] > 0 ? 2 : 1);
-
-        // Add links from RELEVANT existing nodes (triangulation)
-        existingNodes.forEach(existing => {
-          const existingLinks = WikiService.getLinksFromCache(existing);
-          if (existingLinks && existingLinks.includes(link)) {
-            linksToAdd.push({ source: existing, target: link });
-            connectionLogger.log(existing, link, 'auto', 2);
-          }
-        });
-      });
-
-      if (nodesToAdd.length === 0) {
-        setError('No relevant connections found to add.');
-      } else {
-        if (updateQueueRef.current) {
-          updateQueueRef.current.queueUpdate(nodesToAdd, linksToAdd);
-        }
-        if (newAutoDiscovered.size > 0) {
-          setAutoDiscoveredNodes(prev => new Set([...prev, ...newAutoDiscovered]));
-        }
-        setExpandedNodes(prev => new Set([...prev, title]));
-      }
-
-    } catch (err: any) {
-      console.error('[Smart Expand] Error:', err);
-      setError(`Failed to smart expand ${title}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Handle node interactions with new UX
   const handleNodeClick = async (event: any, d: GraphNode) => {
-    // Ignore if this was a drag event
     if (event.defaultPrevented) return;
-
     event.stopPropagation();
+    setClickedLink(null);
 
-    // Ctrl+Click: Open Wikipedia
     if (event.ctrlKey || event.metaKey) {
-      console.log(`[Click] 🌐 Opening Wikipedia for "${d.title}"`);
       window.open(`https://en.wikipedia.org/wiki/${encodeURIComponent(d.title)}`, '_blank');
       return;
     }
 
-    // Shift+Click: Select for pathfinding
     if (event.shiftKey) {
-      console.log(`[Click] ✅ Selecting "${d.title}" for pathfinding`);
       setSelectedNodes(prev => {
         const newSelection = [...prev];
         const index = newSelection.findIndex(n => n.id === d.id);
-
         if (index >= 0) {
-          // Deselect
           newSelection.splice(index, 1);
           setPathNodes(new Set());
           setError('');
+          setClickedLink(null);
         } else {
-          // Select
           newSelection.push(d);
-          if (newSelection.length > 2) {
-            newSelection.shift(); // Keep only last 2
-          }
+          if (newSelection.length > 2) newSelection.shift();
         }
 
-        // If we have 2 nodes selected, find path
         if (newSelection.length === 2) {
-          findPath(newSelection[0].id, newSelection[1].id);
-        } else {
-          setPathNodes(new Set());
-          setError('');
-        }
+          const [n1, n2] = newSelection;
+          const directLink = graphManagerRef.current?.getLinkBetween(n1.id, n2.id);
+          if (directLink) setClickedLink(directLink);
+          else setClickedLink(null);
 
+          findPath(n1.id, n2.id);
+        } else {
+          setPathNodes(new Set()); setError(''); setClickedLink(null);
+        }
         return newSelection;
       });
       return;
     }
 
-    // Single Click: Show persistent summary panel
-    console.log(`[Click] 📖 Showing summary for "${d.title}"`);
-
-    // Highlight node and connections
-    if (graphManagerRef.current) {
-      graphManagerRef.current.highlightNode(d.id);
-    }
+    if (graphManagerRef.current) graphManagerRef.current.highlightNode(d.id);
 
     setClickedNode(d);
     const result = await WikiService.fetchSummary(d.title);
     setClickedSummary(result.summary);
     setClickedThumbnail(result.thumbnail || '');
-    if (result.thumbnail) {
-      setNodeThumbnails(prev => ({ ...prev, [d.title]: result.thumbnail! }));
-    }
+    if (result.thumbnail) setNodeThumbnails(prev => ({ ...prev, [d.title]: result.thumbnail! }));
   };
 
-  // Handle double-click: Expand node
+  const handleLinkClick = (event: any, d: Link) => {
+    event.stopPropagation();
+    setClickedNode(null);
+    setClickedLink(d);
+  };
+
   const handleNodeDoubleClick = (event: any, d: GraphNode) => {
     event.stopPropagation();
-    console.log(`[Click] 🔄 Double-clicked "${d.title}" - expanding`);
     expandNode(d.id);
   };
 
-
   return (
-    <div className="w-full h-screen bg-gray-900 text-white flex flex-col">
-      {/* Header */}
-      <div className="bg-gray-800 border-b border-gray-700 p-4">
-        <h1 className="text-2xl font-bold mb-4 text-blue-400">WikiWeb Explorer</h1>
+    <div className="w-screen h-screen bg-gray-900 text-white relative overflow-hidden font-sans">
+      <div className="absolute inset-0 z-0">
+        <svg ref={svgRef} className="w-full h-full" />
+      </div>
 
-        {/* Search Bar */}
-        <div className="flex gap-2 relative z-50">
-          <div className="flex-1 relative">
+      {/* Floating Search */}
+      <div className="absolute top-6 left-6 z-20 w-96 max-w-full">
+        <div className="bg-gray-800/90 backdrop-blur-md border border-gray-700 shadow-2xl rounded-2xl p-4 flex flex-col gap-3">
+          <h1 className="text-xl font-bold text-blue-400 bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-500">WikiWeb Explorer</h1>
+
+          <div className="relative">
             <input
               type="text"
               value={searchTerm}
@@ -647,315 +563,207 @@ const WikiWebExplorer = () => {
                   setShowSuggestions(false);
                 }
               }}
-              onFocus={() => {
-                if (suggestions.length > 0) setShowSuggestions(true);
-              }}
-              onBlur={() => {
-                // Small delay to allow clicking on suggestions
-                setTimeout(() => setShowSuggestions(false), 200);
-              }}
+              onFocus={() => { if (suggestions.length > 0) setShowSuggestions(true); }}
+              onBlur={() => { setTimeout(() => setShowSuggestions(false), 200); }}
               onKeyPress={(e) => e.key === 'Enter' && addTopic(searchTerm)}
-              placeholder="Enter Wikipedia topic..."
-              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded focus:outline-none focus:border-blue-500"
+              placeholder="Evaluate topic..."
+              className="w-full pl-4 pr-4 py-3 bg-gray-900/50 border border-gray-700 rounded-xl focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all text-sm placeholder-gray-500"
             />
-            {/* Autocomplete Dropdown */}
-            {showSuggestions && suggestions.length > 0 && (
-              <div className="absolute top-full left-0 right-0 mt-1 bg-gray-800 border border-gray-600 rounded shadow-xl max-h-60 overflow-y-auto">
-                {suggestions.map((suggestion, index) => (
-                  <button
-                    key={index}
-                    className="w-full text-left px-3 py-2 hover:bg-gray-700 text-sm text-gray-200 transition"
-                    onClick={() => {
-                      setSearchTerm(suggestion);
-                      setShowSuggestions(false);
-                      addTopic(suggestion);
-                    }}
-                  >
-                    {suggestion}
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
+
+          {showSuggestions && suggestions.length > 0 && (
+            <div className="absolute top-full left-0 right-0 mt-2 bg-gray-800/95 backdrop-blur-xl border border-gray-700 rounded-xl shadow-2xl max-h-60 overflow-y-auto overflow-hidden">
+              {suggestions.map((suggestion, index) => (
+                <button
+                  key={index}
+                  className="w-full text-left px-4 py-3 hover:bg-gray-700/50 text-sm text-gray-200 transition border-b border-gray-700/50 last:border-0"
+                  onClick={() => {
+                    setSearchTerm(suggestion);
+                    setShowSuggestions(false);
+                    addTopic(suggestion);
+                  }}
+                >
+                  {suggestion}
+                </button>
+              ))}
+            </div>
+          )}
+
           <button
             onClick={() => addTopic(searchTerm)}
             disabled={loading || !searchTerm}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 rounded transition"
+            className="w-full py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl text-sm font-semibold shadow-lg transition-all transform active:scale-95"
           >
-            Explore
+            {loading ? 'Thinking...' : 'Start Exploration'}
           </button>
-        </div>
 
-        {/* Visual Controls */}
-        <div className="mt-3 text-xs grid grid-cols-2 gap-3">
-          <div>
-            <label className="text-gray-400 block mb-1">
-              Node Spacing: {nodeSpacing}px
-            </label>
-            <input
-              type="range"
-              min="80"
-              max="300"
-              value={nodeSpacing}
-              onChange={(e) => setNodeSpacing(Number(e.target.value))}
-              className="w-full"
-              aria-label="Node Spacing"
-            />
-          </div>
-          <div>
-            <label className="text-gray-400 block mb-1">
-              Search Depth: {searchDepth} {searchDepth === 1 ? 'level' : 'levels'}
-            </label>
-            <input
-              type="range"
-              min="1"
-              max="3"
-              value={searchDepth}
-              onChange={(e) => setSearchDepth(Number(e.target.value))}
-              className="w-full"
-              aria-label="Search Depth"
-            />
-          </div>
+          {error && (
+            <div className={`text-xs px-2 py-1 rounded bg-red-900/20 border border-red-500/30 ${error.startsWith('Path found') ? 'text-green-400 border-green-500/30' : 'text-red-400'}`}>
+              {error}
+            </div>
+          )}
         </div>
-
-        {/* Prune Tools */}
-        <div className="mt-3 flex justify-end">
-          <button
-            onClick={pruneGraph}
-            className="px-3 py-1 bg-gray-700 hover:bg-red-900 text-gray-300 hover:text-red-200 rounded text-xs border border-gray-600 hover:border-red-700 transition-colors flex items-center gap-2"
-            title="Remove nodes with fewer than 2 connections"
-          >
-            ✂️ Prune Isolated Nodes
-          </button>
-        </div>
-
-        {/* Status Messages */}
-        {loading && (
-          <div className="mt-2 text-blue-400 text-sm flex items-center gap-2">
-            <div className="animate-spin h-4 w-4 border-2 border-blue-400 border-t-transparent rounded-full"></div>
-            Loading...
-          </div>
-        )}
-        {error && (
-          <div className={`mt-2 text-sm ${error.startsWith('Path found') ? 'text-green-400' : 'text-red-400'}`}>
-            {error}
-          </div>
-        )}
       </div>
 
-      {/* Graph Visualization */}
-      <div className="flex-1 relative bg-gray-900">
-        <svg
-          ref={svgRef}
-          className="w-full h-full"
-        />
-
-        {/* Persistent Summary Panel (from click) */}
-        {clickedNode && (
-          <div className="absolute top-4 left-4 max-w-md bg-gray-800 border border-blue-500 rounded p-4 shadow-lg">
-            <button
-              onClick={() => setClickedNode(null)}
-              className="absolute top-2 right-2 text-gray-400 hover:text-white"
-            >
-              ✕
-            </button>
-            <h3 className="font-bold text-blue-400 mb-3 pr-6">{clickedNode.title}</h3>
-            {clickedThumbnail && (
-              <img
-                src={clickedThumbnail}
-                alt={clickedNode.title}
-                className="w-full h-40 object-cover rounded mb-3"
-              />
-            )}
-            <p className="text-sm text-gray-300 mb-3">{clickedSummary || 'Loading summary...'}</p>
-            <div className="flex gap-2">
-              <button
-                onClick={() => window.open(`https://en.wikipedia.org/wiki/${encodeURIComponent(clickedNode.title)}`, '_blank')}
-                className="flex-1 px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-sm"
-              >
-                Open Wiki
-              </button>
-              <button
-                onClick={() => expandNode(clickedNode.id)}
-                className="flex-1 px-3 py-1 bg-purple-600 hover:bg-purple-700 rounded text-sm"
-              >
-                Expand
-              </button>
-              <button
-                onClick={() => smartExpandNode(clickedNode.id)}
-                className="flex-1 px-3 py-1 bg-green-600 hover:bg-green-700 rounded text-sm"
-                title="Find connections to existing topics"
-              >
-                Smart Expand
-              </button>
-            </div>
-            <button
-              onClick={() => deleteNodeImperative(clickedNode.id)}
-              className="mt-3 w-full px-3 py-1 bg-red-900/50 hover:bg-red-800 text-red-200 border border-red-800 rounded text-sm flex items-center justify-center gap-2"
-            >
-              🗑️ Delete Node
-            </button>
-          </div>
-        )}
-
-        {/* Instructions */}
-        {nodeCount === 0 && !loading && (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="text-center text-gray-500 max-w-md">
-              <h2 className="text-xl font-semibold mb-4">Welcome to WikiWeb Explorer</h2>
-              <p className="mb-2">🔍 Search topics to build your knowledge graph</p>
-              <p className="mb-2">🖱️ <strong>Click</strong> = Show summary panel</p>
-              <p className="mb-2">🖱️ <strong>Double-click</strong> = Expand node's connections</p>
-              <p className="mb-2">⌨️ <strong>Ctrl+Click</strong> = Open Wikipedia</p>
-              <p className="mb-2">⌨️ <strong>Shift+Click</strong> two nodes = Find path</p>
-              <p>🖱️ <strong>Drag</strong> nodes • <strong>Scroll</strong> to zoom</p>
-            </div>
-          </div>
-        )}
-
-        {/* Trash Can Zone */}
-        <div
-          className={`absolute bottom-4 left-4 w-32 h-32 rounded-lg border-4 transition-all ${isOverTrash
-            ? 'bg-red-600 border-red-400 scale-110'
-            : 'bg-gray-800 border-gray-600 hover:border-gray-500'
-            }`}
+      {/* Floating Controls */}
+      <div className="absolute bottom-6 right-6 z-20 flex flex-col items-end gap-3">
+        <button
+          onClick={() => setShowSettings(!showSettings)}
+          className="w-12 h-12 bg-gray-800/80 backdrop-blur-md border border-gray-600/50 rounded-full shadow-xl flex items-center justify-center hover:bg-gray-700 text-gray-300 transition-all hover:scale-105"
+          title="Settings"
         >
-          <div className="flex flex-col items-center justify-center h-full">
-            <svg
-              className={`w-16 h-16 transition-colors ${isOverTrash ? 'text-white' : 'text-gray-400'
-                }`}
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-              />
-            </svg>
-            <span className={`text-sm font-medium mt-2 ${isOverTrash ? 'text-white' : 'text-gray-400'}`}>
-              Drag to Delete
-            </span>
-          </div>
-        </div>
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path></svg>
+        </button>
 
-        {/* Connection Logs Panel */}
-        <LogPanel />
-
-        {/* Color Legend */}
-        {nodeCount > 0 && (
-          <div className="absolute bottom-4 right-4 bg-gray-800 border border-gray-700 rounded p-3 shadow-lg text-xs">
-            <h4 className="font-bold text-gray-300 mb-2">Node Colors</h4>
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-4 rounded-full bg-blue-500"></div>
-                <span className="text-gray-400">User-typed topics</span>
+        {/* Settings Bubble */}
+        {showSettings && (
+          <div className="bg-gray-800/90 backdrop-blur-md border border-gray-700/50 rounded-2xl p-4 shadow-2xl w-64 mb-1 animate-fade-in-up">
+            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">Graph Physics</h3>
+            <div className="space-y-4">
+              <div>
+                <div className="flex justify-between text-xs text-gray-400 mb-1">
+                  <span>Spacing</span>
+                  <span>{nodeSpacing}px</span>
+                </div>
+                <input type="range" min="80" max="300" value={nodeSpacing} onChange={(e) => setNodeSpacing(Number(e.target.value))} className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer" />
               </div>
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-4 rounded-full bg-[#9966ff]"></div>
-                <span className="text-gray-400">Auto-discovered</span>
+              <div>
+                <div className="flex justify-between text-xs text-gray-400 mb-1">
+                  <span>Recursion Depth</span>
+                  <span>{searchDepth}</span>
+                </div>
+                <input type="range" min="1" max="3" value={searchDepth} onChange={(e) => setSearchDepth(Number(e.target.value))} className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer" />
               </div>
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-4 rounded-full bg-[#ff00ff]"></div>
-                <span className="text-gray-400">Newly added (2s)</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-4 rounded-full bg-green-500"></div>
-                <span className="text-gray-400">Path connection</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-4 rounded-full bg-yellow-400"></div>
-                <span className="text-gray-400">Currently exploring</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-4 rounded-full bg-orange-500"></div>
-                <span className="text-gray-400">Selected for path</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-4 rounded-full border-2 border-[#00ffff]"></div>
-                <span className="text-gray-400">Expanded node</span>
-              </div>
+              {/* Auto Test Button */}
+              <button
+                onClick={runAutoTest}
+                className="w-full py-2 bg-purple-900/30 border border-purple-500/50 text-purple-300 text-xs rounded hover:bg-purple-900/50 transition"
+              >
+                🛠️ Run Auto-Test (Facebook)
+              </button>
             </div>
           </div>
         )}
 
-        {/* Search Progress Panel */}
-        {searchProgress.isSearching && (
-          <div className="absolute top-4 left-4 bg-gray-800 border border-blue-500 rounded p-4 shadow-lg max-w-sm">
-            <h3 className="font-bold text-blue-400 mb-3 flex items-center gap-2">
-              <div className="animate-spin h-4 w-4 border-2 border-blue-400 border-t-transparent rounded-full"></div>
-              Path Search in Progress
-            </h3>
+        <button
+          onClick={pruneGraph}
+          className="h-12 px-6 bg-gray-800/80 hover:bg-red-900/80 backdrop-blur-md border border-gray-600/50 hover:border-red-500/50 rounded-full shadow-xl flex items-center gap-2 text-gray-200 hover:text-white transition-all hover:scale-105"
+          title="Clean up isolated nodes"
+        >
+          <span className="text-lg">✂️</span>
+          <span className="font-semibold text-sm">Prune</span>
+        </button>
+      </div>
 
-            {/* Progress Bar */}
-            <div className="mb-3">
-              <div className="flex justify-between text-xs text-gray-400 mb-1">
-                <span>Depth {searchProgress.currentDepth} of {searchProgress.maxDepth}</span>
-                <span>{Math.round((searchProgress.currentDepth / searchProgress.maxDepth) * 100)}%</span>
-              </div>
-              <div className="w-full bg-gray-700 rounded-full h-2">
-                <div
-                  className="bg-blue-500 h-2 rounded-full transition-all duration-300"
-                  style={{ width: `${(searchProgress.currentDepth / searchProgress.maxDepth) * 100}%` }}
-                ></div>
-              </div>
+      {/* Search Terminal Overlays */}
+      {searchProgress.isSearching && (
+        <div className="absolute bottom-6 left-6 z-30 w-80">
+          <div className="bg-black/90 backdrop-blur-md border border-green-500/50 rounded-xl p-4 shadow-2xl font-mono text-xs text-green-400">
+            <div className="flex justify-between items-center mb-2 border-b border-green-500/30 pb-2">
+              <span className="animate-pulse flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-green-500"></span>
+                SEARCHING MATRIX
+              </span>
+              <span>{searchProgress.exploredCount} nodes</span>
             </div>
-
-            {/* Current Status */}
-            <div className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span className="text-gray-400">Currently exploring:</span>
-                <span className="text-yellow-400 font-semibold">{searchProgress.currentPage}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-400">Pages explored:</span>
-                <span className="text-white font-semibold">{searchProgress.exploredCount}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-400">Queue size:</span>
-                <span className="text-white font-semibold">{searchProgress.queueSize}</span>
-              </div>
+            <div className="space-y-1 h-32 overflow-hidden flex flex-col justify-end">
+              {searchLog.map((log, i) => (
+                <div key={i} className="truncate opacity-80 border-l border-green-500/20 pl-2">{log}</div>
+              ))}
             </div>
-
-            <div className="mt-3 text-xs text-gray-500">
-              💡 Check browser console for detailed logs
-            </div>
-
-            {/* Cancel Button */}
             <button
               onClick={cancelSearch}
-              className="mt-3 w-full px-3 py-2 bg-red-600 hover:bg-red-700 text-white rounded transition text-sm font-semibold"
+              className="mt-3 w-full border border-red-900 bg-red-900/20 text-red-400 hover:bg-red-900/40 rounded px-2 py-1 text-center transition"
             >
-              Cancel Search
+              ABORT SEQUENCE
             </button>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Selected nodes indicator */}
-        {selectedNodes.length > 0 && !searchProgress.isSearching && (
-          <div className="absolute top-4 right-4 bg-gray-800 border border-orange-500 rounded p-3 shadow-lg">
-            <h3 className="font-bold text-orange-400 mb-2">
-              Selected ({selectedNodes.length}/2)
-            </h3>
-            {selectedNodes.map((node, i) => (
-              <p key={node.id} className="text-sm text-gray-300">
-                {i + 1}. {node.title}
-              </p>
-            ))}
-            <p className="text-xs text-gray-500 mt-2">
-              {selectedNodes.length === 1 ? 'Shift+Click another node' : 'Ready to search'}
-            </p>
+      {!searchProgress.isSearching && (
+        <div className="absolute bottom-6 left-6 z-20 pointer-events-none">
+          <div className="bg-gray-800/60 backdrop-blur-sm border border-gray-700/30 rounded-full px-4 py-2 text-xs text-gray-400 flex gap-4 shadow-lg">
+            <span>Nodes: <strong className="text-gray-200">{nodeCount}</strong></span>
+            <span>Connections: <strong className="text-gray-200">{linkCount}</strong></span>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
-      {/* Footer Stats */}
-      <div className="bg-gray-800 border-t border-gray-700 px-4 py-2 text-xs text-gray-400 flex justify-between">
-        <span>{nodeCount} nodes • {linkCount} connections</span>
-        <span>Cached: {WikiService.getCachedNodes().length} topics</span>
-      </div>
+      {/* Floating Node Details - Side Panel */}
+      {clickedNode && (
+        <div className="absolute top-6 right-6 z-30 w-80 max-w-[90vw]">
+          <div className="bg-gray-800/95 backdrop-blur-xl border border-gray-600/50 rounded-2xl shadow-2xl overflow-hidden flex flex-col animate-fade-in-right">
+            <div className="relative h-40 bg-gray-900 skeleton-loader">
+              {clickedThumbnail ? (
+                <img src={clickedThumbnail} alt={clickedNode.title} className="w-full h-full object-cover" />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center text-gray-600 text-4xl font-serif italic">W</div>
+              )}
+              <button onClick={() => setClickedNode(null)} className="absolute top-2 right-2 bg-black/50 hover:bg-black/70 rounded-full p-1 text-white backdrop-blur-sm transition">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+              </button>
+            </div>
+
+            <div className="p-5">
+              <h2 className="text-xl font-bold text-white mb-2 leading-tight">{clickedNode.title}</h2>
+              <p className="text-sm text-gray-300 mb-4 leading-relaxed max-h-40 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-transparent pr-2">
+                {clickedSummary || 'Loading summary...'}
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                <button onClick={() => window.open(`https://en.wikipedia.org/wiki/${encodeURIComponent(clickedNode.title)}`, '_blank')} className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-xl text-xs font-medium transition">Read Article ↗</button>
+                <button onClick={() => expandNode(clickedNode.id)} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-xl text-xs font-medium transition shadow-lg shadow-indigo-500/20">Expand</button>
+              </div>
+              <button onClick={() => deleteNodeImperative(clickedNode.id)} className="mt-3 w-full py-2 bg-red-500/10 hover:bg-red-500/20 text-red-300 rounded-xl text-xs transition border border-red-500/20">Remove from Graph</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Link Context Dialog */}
+      {clickedLink && (
+        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-40 max-w-lg w-full p-4 animate-pop-in">
+          <div className="bg-gray-900/95 backdrop-blur-2xl border border-green-500/50 rounded-3xl p-6 shadow-2xl relative overflow-hidden">
+            <div className="absolute -top-10 -right-10 w-40 h-40 bg-green-500/10 rounded-full blur-3xl pointer-events-none"></div>
+            <button onClick={() => setClickedLink(null)} className="absolute top-4 right-4 p-2 bg-gray-800/50 rounded-full text-gray-400 hover:text-white hover:bg-gray-700 transition" title="Close"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
+
+            <div className="relative z-10">
+              <div className="flex items-center gap-3 mb-6">
+                <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-green-500 to-emerald-700 flex items-center justify-center text-white shadow-lg shadow-green-900/50">
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
+                </div>
+                <div>
+                  <h3 className="text-xs font-bold text-green-400 uppercase tracking-widest mb-1">Connection Verification</h3>
+                  <div className="text-lg font-bold text-white flex items-center gap-2">
+                    <span>{typeof clickedLink.source === 'object' ? clickedLink.source.title : clickedLink.source}</span>
+                    <span className="text-gray-500 text-sm">linked to</span>
+                    <span>{typeof clickedLink.target === 'object' ? clickedLink.target.title : clickedLink.target}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="bg-gray-800/60 rounded-xl p-4 border border-gray-700/50">
+                  <h4 className="text-[10px] uppercase text-gray-500 font-bold mb-2 flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-blue-400"></span>Evidence (Source Text)</h4>
+                  <p className="text-sm text-gray-200 italic leading-relaxed font-serif border-l-2 border-blue-500/50 pl-3">"{clickedLink.context || 'Context text unavailable via API.'}"</p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-gray-800/60 rounded-xl p-3 border border-gray-700/50">
+                    <h4 className="text-[10px] uppercase text-gray-500 font-bold mb-1">Determination Method</h4>
+                    <p className="text-xs text-gray-300">Direct Hyperlink in Source Article</p>
+                  </div>
+                  <div className="bg-gray-800/60 rounded-xl p-3 border border-gray-700/50">
+                    <h4 className="text-[10px] uppercase text-gray-500 font-bold mb-1">Link Type</h4>
+                    <p className="text-xs text-gray-300 capitalize">{clickedLink.type || 'Manual'} Connection</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };

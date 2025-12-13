@@ -1,175 +1,196 @@
+import { GraphManager } from './GraphManager';
 
-interface WikiSummary {
-    summary: string;
-    thumbnail: string | null;
+const CACHE_KEY = 'wiki-cache-v1';
+
+export interface LinkWithContext {
+    title: string;
+    context?: string;
+}
+
+interface CacheItem {
+    links: LinkWithContext[]; // Updated to store context
+    timestamp: number;
+}
+
+export interface SummaryData {
+    title: string;
+    extract: string;
+    description: string;
+    thumbnail: string;
 }
 
 export class WikiService {
-    private static cache: Record<string, string[]> = {};
-    private static summaryCache: Record<string, WikiSummary> = {};
+    private static cache: Map<string, CacheItem> = new Map();
+    private static summaryCache: Map<string, SummaryData> = new Map();
 
-    /**
-     * Fetch links from the intro section of a Wikipedia page.
-     * Uses simple caching to avoid repeated requests.
-     */
-    static async fetchLinks(title: string): Promise<string[]> {
-        if (this.cache[title]) {
-            return this.cache[title];
+    static async resolveTitle(query: string): Promise<string> {
+        try {
+            const response = await fetch(
+                `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(query)}&redirects=1&format=json&origin=*`
+            );
+            const data = await response.json();
+            const pages = data.query.pages;
+            const pageId = Object.keys(pages)[0];
+
+            if (pageId === '-1') {
+                throw new Error(`Page "${query}" not found on Wikipedia.`);
+            }
+
+            return pages[pageId].title;
+        } catch (err) {
+            console.warn(`[WikiService] Could not resolve "${query}", using original.`, err);
+            return query;
+        }
+    }
+
+    static async fetchLinks(title: string): Promise<LinkWithContext[]> {
+        // Check cache
+        if (this.cache.has(title)) {
+            const item = this.cache.get(title)!;
+            if (Date.now() - item.timestamp < 1000 * 60 * 60) { // 1 hour cache
+                return item.links;
+            }
         }
 
         try {
-            // Use parse API with section=0 to get only intro links (most relevant)
+            // Use parse action to get text content for context extraction
             const response = await fetch(
                 `https://en.wikipedia.org/w/api.php?action=parse&page=${encodeURIComponent(
                     title
-                )}&prop=links&section=0&format=json&origin=*&redirects=1`
+                )}&prop=text&section=0&format=json&origin=*&redirects=1`
             );
 
-            if (!response.ok) {
-                throw new Error(`HTTP error: ${response.status}`);
-            }
+            if (!response.ok) throw new Error('Failed to fetch from Wikipedia');
 
             const data = await response.json();
 
-            if (!data.parse || !data.parse.links) {
-                console.warn(`[WikiService] Page "${title}" has no parseable content`);
-                this.cache[title] = [];
-                return [];
-            }
+            if (data.error) throw new Error(data.error.info);
 
-            // Blacklist of terms to ignore
-            const BLACKLIST = [
-                'ISSN', 'ISBN', 'PMID', 'Doi', 'S2CID', 'JSTOR', 'OCLC', 'LCCN',
-                'Wayback Machine', 'Help:', 'Category:', 'Portal:', 'Talk:', 'Special:',
-                'Wikipedia:', 'Template:', 'File:', 'Main Page', 'Identifier', 'Bibcode',
-                'ArXiv', 'ASIN'
-            ];
+            const htmlContent = data.parse?.text['*'];
 
-            // Regex for years (1000-2099), decades (1990s), and dates
-            const DATE_REGEX = /^(\d{4}(s)?|January|February|March|April|May|June|July|August|September|October|November|December)\b/i;
+            if (!htmlContent) return []; // Should not happen if page exists
 
-            const links = data.parse.links
-                .filter((link: any) => link.ns === 0) // Articles only
-                .map((link: any) => link['*'])
-                .filter((title: string) => {
-                    // Filter out blacklisted terms
-                    if (BLACKLIST.some(term => title.includes(term))) return false;
-                    // Filter out dates/years
-                    if (DATE_REGEX.test(title)) return false;
-                    // Filter out single characters or very short junk
-                    if (title.length < 2) return false;
-                    return true;
-                });
+            const links = this.extractLinksWithContext(htmlContent);
 
-            // Shuffle links (Fisher-Yates) to avoid alphabetical bias
-            for (let i = links.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                [links[i], links[j]] = [links[j], links[i]];
-            }
+            // Update cache
+            this.cache.set(title, {
+                links: links,
+                timestamp: Date.now()
+            });
 
-            // Take top 50 unique after shuffle
-            const uniqueLinks = Array.from(new Set(links)).slice(0, 50) as string[];
+            return links;
 
-            this.cache[title] = uniqueLinks;
-            return uniqueLinks;
-        } catch (err: any) {
-            console.error('Fetch error:', err);
-            // Don't throw if possible, just return empty to keep app alive?
-            // But caller might want to know. Let's rethrow for now.
-            throw new Error(`Failed to fetch links: ${err.message}`);
+        } catch (error) {
+            console.error('Wiki API Error:', error);
+            // Fallback or rethrow?
+            return [];
         }
     }
 
     /**
-     * Fetch summary and thumbnail from Wikipedia REST API.
+     * Parse HTML to find links and extract their surrounding sentence/context.
      */
-    static async fetchSummary(title: string): Promise<WikiSummary> {
-        if (this.summaryCache[title]) {
-            return this.summaryCache[title];
-        }
+    private static extractLinksWithContext(html: string): LinkWithContext[] {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
 
-        try {
-            const response = await fetch(
-                `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`,
-                {
-                    headers: {
-                        'Accept': 'application/json'
-                    }
-                }
-            );
+        // We want to avoid links in infoboxes, navboxes, references, etc. if possible
+        // But standard 'parse' output is messy. Let's trust standard paragraphs <p> mostly.
+        const paragraphs = doc.querySelectorAll('p');
+        const results: LinkWithContext[] = [];
+        const seen = new Set<string>();
 
-            if (!response.ok) {
-                return { summary: 'Summary not available', thumbnail: null };
-            }
+        paragraphs.forEach(p => {
+            // Get all links in this paragraph
+            const anchors = p.querySelectorAll('a');
+            anchors.forEach(a => {
+                const linkTitle = a.getAttribute('title');
+                const linkText = a.textContent;
 
-            const data = await response.json();
+                // Filter logic
+                if (!linkTitle || !linkText) return;
+                if (linkTitle.startsWith('Help:') || linkTitle.startsWith('File:') || linkTitle.startsWith('Wikipedia:') || linkTitle.startsWith('Edit section')) return;
 
-            const result = {
-                summary: data.extract || 'No summary available',
-                thumbnail: data.thumbnail?.source || null
-            };
+                const cleanTitle = linkTitle;
 
-            this.summaryCache[title] = result;
-            return result;
-        } catch (err) {
-            console.error('Summary fetch error:', err);
-            return { summary: 'Failed to load summary', thumbnail: null };
-        }
-    }
+                if (seen.has(cleanTitle)) return;
+                // Limit check? No, fetchLinks can handle limits or we slice later. 
+                // But for graph performance let's keep it reasonable per page? 
+                // Let's cap at 50 per page here to avoid massive processing.
+                if (seen.size >= 50) return;
 
-    /**
-   * Pre-fetch multiple pages if possible, or just helper for parallel.
-   */
-    static async fetchSeveral(titles: string[]): Promise<Record<string, string[]>> {
-        const results: Record<string, string[]> = {};
-        await Promise.all(
-            titles.map(async (t) => {
-                try {
-                    results[t] = await this.fetchLinks(t);
-                } catch {
-                    results[t] = [];
-                }
-            })
-        );
+                // Extract Context: The sentence containing this link.
+                // Simple regex split on sentences?
+                const textContent = p.textContent || '';
+                // Escape special chars for regex
+                const escapedLinkText = linkText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                // Find sentence: look for [.?!] followed by space or end, containing the link text
+                // This is tricky. Simplified: take a window around the link.
+                // Or just split by sentences and find the one with the link.
+
+                const sentences = textContent.match(/[^.!?]+[.!?]+/g) || [textContent];
+                const contextSentence = sentences.find(s => s.includes(linkText))?.trim() || p.textContent?.substring(0, 150) + '...';
+
+                results.push({
+                    title: cleanTitle,
+                    context: contextSentence
+                });
+                seen.add(cleanTitle);
+            });
+        });
+
         return results;
     }
 
-    /**
-     * Get list of all nodes currently in cache
-     */
+    static getLinksFromCache(title: string): LinkWithContext[] | undefined {
+        return this.cache.get(title)?.links;
+    }
+
     static getCachedNodes(): string[] {
-        return Object.keys(this.cache);
+        return Array.from(this.cache.keys());
     }
 
-    /**
-     * Get links for a node from cache without fetching
-     */
-    static getLinksFromCache(title: string): string[] | undefined {
-        return this.cache[title];
-    }
-
-    /**
-     * Search Wikipedia for titles matching the query (for autocomplete)
-     */
-    static async search(query: string): Promise<string[]> {
-        if (!query || query.length < 2) return [];
-
+    static async search(term: string): Promise<string[]> {
         try {
             const response = await fetch(
                 `https://en.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(
-                    query
+                    term
                 )}&limit=5&namespace=0&format=json&origin=*`
             );
-
-            if (!response.ok) return [];
-
             const data = await response.json();
-            // OpenSearch returns [query, [titles], [descriptions], [urls]]
-            // We just want the titles (index 1)
-            return data[1] || [];
-        } catch (err) {
-            console.error('Search error:', err);
+            return data[1];
+        } catch (error) {
+            console.error('Search Error:', error);
             return [];
+        }
+    }
+
+    static async fetchSummary(title: string): Promise<{ summary: string; thumbnail?: string }> {
+        // Check cache
+        if (this.summaryCache.has(title)) {
+            return this.summaryCache.get(title)!;
+        }
+
+        try {
+            const response = await fetch(
+                `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`
+            );
+            if (!response.ok) throw new Error('Failed to fetch summary');
+            const data = await response.json();
+
+            const result = {
+                title: data.title,
+                extract: data.extract,
+                description: data.description,
+                summary: data.extract,
+                thumbnail: data.thumbnail?.source
+            };
+
+            this.summaryCache.set(title, result);
+            return result;
+        } catch (err) {
+            console.error(err);
+            return { summary: 'No summary available.', thumbnail: undefined };
         }
     }
 }

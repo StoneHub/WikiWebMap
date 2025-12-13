@@ -14,6 +14,9 @@ export interface Node {
 export interface Link {
   source: string | Node;
   target: string | Node;
+  id?: string;
+  type?: string; // 'manual', 'auto', 'expand', 'path'
+  context?: string; // Text context from Wikipedia
 }
 
 export interface GraphCallbacks {
@@ -21,6 +24,7 @@ export interface GraphCallbacks {
   onNodeDoubleClick?: (node: Node, event: MouseEvent) => void;
   onNodeDragStart?: (node: Node) => void;
   onNodeDragEnd?: (node: Node, isOverTrash: boolean) => void;
+  onLinkClick?: (link: Link, event: MouseEvent) => void;
   onStatsUpdate?: (stats: { nodeCount: number; linkCount: number }) => void;
 }
 
@@ -111,7 +115,7 @@ export class GraphManager {
       .force('link', d3.forceLink<Node, Link>(this.links)
         .id((d: any) => d.id)
         .distance(this.nodeSpacing))
-      .force('charge', d3.forceManyBody().strength(-200))
+      .force('charge', d3.forceManyBody().strength(-500)) // Stronger repulsion
       .force('center', d3.forceCenter(this.width / 2, this.height / 2))
       .force('collision', d3.forceCollide().radius((d: any) => {
         const node = d as Node;
@@ -134,8 +138,8 @@ export class GraphManager {
     newNodes.forEach(node => {
       if (!this.nodes.find(n => n.id === node.id)) {
         // Give node initial random position if not set
-        if (node.x === undefined) node.x = this.width / 2 + (Math.random() - 0.5) * 100;
-        if (node.y === undefined) node.y = this.height / 2 + (Math.random() - 0.5) * 100;
+        if (node.x === undefined) node.x = this.width / 2 + (Math.random() - 0.5) * 300;
+        if (node.y === undefined) node.y = this.height / 2 + (Math.random() - 0.5) * 300;
 
         this.nodes.push(node);
         added++;
@@ -179,15 +183,19 @@ export class GraphManager {
 
       if (sourceExists && targetExists) {
         // Check if link already exists
-        const exists = this.links.find(l => {
+        const existingLink = this.links.find(l => {
           const lSourceId = typeof l.source === 'object' ? l.source.id : l.source;
           const lTargetId = typeof l.target === 'object' ? l.target.id : l.target;
           return lSourceId === sourceId && lTargetId === targetId;
         });
 
-        if (!exists) {
+        if (!existingLink) {
           this.links.push(link);
           added++;
+        } else {
+          // Update metadata/upgrade link
+          if (link.type === 'path') existingLink.type = 'path';
+          if (link.context && !existingLink.context) existingLink.context = link.context; // Enrich
         }
       }
     });
@@ -250,6 +258,10 @@ export class GraphManager {
 
       this.simulation.nodes(this.nodes);
       (this.simulation.force('link') as d3.ForceLink<Node, Link>).links(this.links);
+
+      // Force aggressive reorganization
+      this.simulation.alpha(1).restart();
+
       this.updateDOM();
       this.notifyStats();
     }
@@ -364,8 +376,6 @@ export class GraphManager {
    * Update DOM - D3 join pattern
    */
   private updateDOM() {
-    console.log(`[GraphManager] updateDOM called - ${this.nodes.length} nodes, ${this.links.length} links`);
-
     // Update image patterns in defs
     this.updateImagePatterns();
 
@@ -413,12 +423,16 @@ export class GraphManager {
         return `${sourceId}-${targetId}`;
       });
 
-    linkElements.enter()
+    const enter = linkElements.enter()
       .append('line')
       .attr('stroke', '#444')
       .attr('stroke-width', 2)
       .attr('stroke-opacity', 0.6)
-      .merge(linkElements as any)
+      .style('cursor', 'pointer'); // Link clickability
+
+    const merged = enter.merge(linkElements as any);
+
+    merged
       .attr('stroke', d => {
         const sourceId = typeof d.source === 'object' ? d.source.id : d.source;
         const targetId = typeof d.target === 'object' ? d.target.id : d.target;
@@ -426,13 +440,13 @@ export class GraphManager {
         const targetMeta = this.nodeMetadata.get(targetId);
 
         if (sourceMeta?.isDimmed || targetMeta?.isDimmed) {
-          return '#333'; // Dimmed color
+          return '#555';
         }
 
         if (sourceMeta?.isInPath && targetMeta?.isInPath) {
-          return '#00ff88'; // Green for path
+          return '#00ff88';
         }
-        return '#888'; // Lighter grey for visible
+        return '#888';
       })
       .attr('stroke-width', d => {
         const sourceId = typeof d.source === 'object' ? d.source.id : d.source;
@@ -443,9 +457,9 @@ export class GraphManager {
         if (sourceMeta?.isDimmed || targetMeta?.isDimmed) return 1;
 
         if (sourceMeta?.isInPath && targetMeta?.isInPath) {
-          return 4; // Thick for path
+          return 4;
         }
-        return 2; // Thicker otherwise
+        return 3;
       })
       .attr('stroke-opacity', d => {
         const sourceId = typeof d.source === 'object' ? d.source.id : d.source;
@@ -453,9 +467,17 @@ export class GraphManager {
         const sourceMeta = this.nodeMetadata.get(sourceId);
         const targetMeta = this.nodeMetadata.get(targetId);
 
-        if (sourceMeta?.isDimmed || targetMeta?.isDimmed) return 0.1;
-        return 0.8;
+        if (sourceMeta?.isDimmed || targetMeta?.isDimmed) return 0.2;
+        return 0.6;
       });
+
+    // Link events
+    merged.on('click', (event, d) => {
+      event.stopPropagation();
+      if (this.callbacks.onLinkClick) {
+        this.callbacks.onLinkClick(d, event);
+      }
+    });
 
     linkElements.exit().remove();
   }
@@ -482,7 +504,7 @@ export class GraphManager {
       const meta: Partial<NodeMetadata> = this.nodeMetadata.get(d.id) || {};
 
       // Update opacity based on dimming
-      group.attr('opacity', meta.isDimmed ? 0.2 : 1);
+      group.attr('opacity', meta.isDimmed ? 0.4 : 1);
 
       // Calculate radius based on connections
       const connections = this.links.filter(l => {
@@ -674,6 +696,15 @@ export class GraphManager {
         linkCount: this.links.length,
       });
     }
+  }
+
+  // --- New Helper for Connection Verification ---
+  getLinkBetween(sourceId: string, targetId: string): Link | undefined {
+    return this.links.find(l => {
+      const s = typeof l.source === 'object' ? l.source.id : l.source;
+      const t = typeof l.target === 'object' ? l.target.id : l.target;
+      return (s === sourceId && t === targetId) || (s === targetId && t === sourceId);
+    });
   }
 
   /**
