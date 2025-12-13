@@ -1,6 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { GraphManager, Node as GraphNode, Link } from './GraphManager';
 import { UpdateQueue } from './UpdateQueue';
+import { WikiService } from './WikiService';
+import { connectionLogger } from './ConnectionLogger';
+import LogPanel from './components/LogPanel';
 import './index.css';
 
 const WikiWebExplorer = () => {
@@ -35,7 +38,6 @@ const WikiWebExplorer = () => {
   const svgRef = useRef<SVGSVGElement>(null);
   const graphManagerRef = useRef<GraphManager | null>(null);
   const updateQueueRef = useRef<UpdateQueue | null>(null);
-  const cacheRef = useRef<Record<string, string[]>>({});
   const searchAbortRef = useRef(false);
 
   // Visual settings
@@ -129,82 +131,7 @@ const WikiWebExplorer = () => {
     nodeThumbnails,
   ]);
 
-  // Fetch Wikipedia links from intro section (most relevant links)
-  const fetchWikiLinks = async (title: string): Promise<string[]> => {
-    if (cacheRef.current[title]) {
-      return cacheRef.current[title];
-    }
-
-    try {
-      // Use parse API with section=0 to get only intro links (most relevant)
-      const response = await fetch(
-        `https://en.wikipedia.org/w/api.php?action=parse&page=${encodeURIComponent(
-          title
-        )}&prop=links&section=0&format=json&origin=*&redirects=1`
-      );
-
-      if (!response.ok) {
-        throw new Error(`HTTP error: ${response.status}`);
-      }
-
-      const data = await response.json();
-
-      if (!data.parse || !data.parse.links) {
-        // Page might not exist or have no links
-        console.warn(`[fetchWikiLinks] Page "${title}" has no parseable content`);
-        cacheRef.current[title] = []; // Cache empty result
-        return [];
-      }
-
-      // Filter to article links only and take first 50
-      const links = data.parse.links
-        .filter((link: any) => link.ns === 0)  // namespace 0 = articles only
-        .map((link: any) => link['*'])
-        .slice(0, 50);
-
-      cacheRef.current[title] = links;
-      return links;
-    } catch (err: any) {
-      console.error('Fetch error:', err);
-      throw new Error(`Failed to fetch links: ${err.message}`);
-    }
-  };
-
-  // Fetch Wikipedia summary and thumbnail
-  const fetchSummary = async (title: string): Promise<{ summary: string; thumbnail: string | null }> => {
-    try {
-      const response = await fetch(
-        `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`,
-        {
-          headers: {
-            'Accept': 'application/json'
-          }
-        }
-      );
-
-      if (!response.ok) {
-        return { summary: 'Summary not available', thumbnail: null };
-      }
-
-      const data = await response.json();
-
-      // Cache thumbnail if available
-      if (data.thumbnail?.source) {
-        setNodeThumbnails(prev => ({
-          ...prev,
-          [title]: data.thumbnail.source
-        }));
-      }
-
-      return {
-        summary: data.extract || 'No summary available',
-        thumbnail: data.thumbnail?.source || null
-      };
-    } catch (err) {
-      console.error('Summary fetch error:', err);
-      return { summary: 'Failed to load summary', thumbnail: null };
-    }
-  };
+  // -- Refactored to use WikiService --
 
   // Add topic to graph with auto-connection to existing nodes
   const addTopic = async (title: string) => {
@@ -222,10 +149,13 @@ const WikiWebExplorer = () => {
     setError('');
 
     try {
-      const links = await fetchWikiLinks(title);
+      const links = await WikiService.fetchLinks(title);
 
       // Fetch thumbnail for the user-typed node
-      await fetchSummary(title);
+      const summaryData = await WikiService.fetchSummary(title);
+      if (summaryData.thumbnail) {
+        setNodeThumbnails(prev => ({ ...prev, [title]: summaryData.thumbnail! }));
+      }
 
       // Mark this as a user-typed node
       setUserTypedNodes(prev => new Set([...prev, title]));
@@ -240,6 +170,7 @@ const WikiWebExplorer = () => {
         newNodes.push({ id: link, title: link });
         newAutoDiscovered.add(link);
         newLinks.push({ source: title, target: link });
+        connectionLogger.log(title, link, 'manual');
       });
 
       // Update auto-discovered nodes
@@ -248,14 +179,17 @@ const WikiWebExplorer = () => {
       // Auto-connect: check if existing nodes link to this new topic
       const stats = graphManagerRef.current?.getStats();
       if (stats && stats.nodeCount > 0) {
-        // Check cached links for existing nodes
-        Object.keys(cacheRef.current).forEach(existingNodeId => {
-          const cachedLinks = cacheRef.current[existingNodeId];
+        // Check cached links for existing nodes for reverse connections
+        WikiService.getCachedNodes().forEach(existingNodeId => {
+          const cachedLinks = WikiService.getLinksFromCache(existingNodeId);
           if (cachedLinks && cachedLinks.includes(title)) {
+            // Avoid duplicates if graph already has it? GraphManager handles idempotency mostly
             newLinks.push({ source: existingNodeId, target: title });
+            connectionLogger.log(existingNodeId, title, 'auto');
           }
         });
       }
+
 
       // Queue the update
       updateQueueRef.current.queueUpdate(newNodes, newLinks);
@@ -383,7 +317,7 @@ const WikiWebExplorer = () => {
 
         let links = [];
         try {
-          links = await fetchWikiLinks(current);
+          links = await WikiService.fetchLinks(current);
           console.log(`[PathFinder] 🔗 Found ${links.length} links from "${current}": [${links.slice(0, 5).join(', ')}${links.length > 5 ? '...' : ''}]`);
         } catch (err: any) {
           console.error(`[PathFinder] ⚠️ Failed to fetch links for "${current}":`, err.message);
@@ -405,6 +339,9 @@ const WikiWebExplorer = () => {
             nodesToAdd.push({ id: link, title: link });
             newAutoDiscovered.add(link);
             linksToAdd.push({ source: current, target: link });
+            // Only log if it's part of the exploration path? Or all? 
+            // Logging all explored edges might be too much noise, but requested "persistent logging of what connections are made".
+            connectionLogger.log(current, link, 'path');
           }
         });
 
@@ -443,16 +380,16 @@ const WikiWebExplorer = () => {
 
             // Fetch links for all nodes in this batch
             await Promise.all(batch.map(async (purpleNode: string) => {
-              // Skip if already cached (already explored)
-              if (cacheRef.current[purpleNode]) return;
+              // Skip if already cached/handled by WikiService heavily, but we check logic here
+              // WikiService handles caching.
 
               try {
-                const purpleLinks = await fetchWikiLinks(purpleNode);
+                const purpleLinks = await WikiService.fetchLinks(purpleNode);
                 console.log(`[PathFinder] 🟣 Purple node "${purpleNode}" → ${purpleLinks.length} sub-links`);
 
                 // Collect nodes and links for batch update
                 purpleLinks.forEach((subLink: string) => {
-                  // Check if not already in batch
+                  // Check if not already in batch - logic remains same
                   if (!purpleBatch.nodes.find(n => n.id === subLink)) {
                     purpleBatch.nodes.push({ id: subLink, title: subLink });
                     purpleBatch.autoDiscovered.add(subLink);
@@ -460,6 +397,7 @@ const WikiWebExplorer = () => {
 
                   // Add purple-to-purple edge
                   purpleBatch.links.push({ source: purpleNode, target: subLink });
+                  connectionLogger.log(purpleNode, subLink, 'path');
                 });
               } catch (err: any) {
                 console.error(`[PathFinder] ⚠️ Failed to fetch purple links for "${purpleNode}":`, err.message);
@@ -557,7 +495,7 @@ const WikiWebExplorer = () => {
 
     setLoading(true);
     try {
-      const links = await fetchWikiLinks(title);
+      const links = await WikiService.fetchLinks(title);
       console.log(`[Expand] ➕ Adding ${links.length} sub-nodes for "${title}"`);
 
       const nodesToAdd: GraphNode[] = [];
@@ -568,6 +506,7 @@ const WikiWebExplorer = () => {
         nodesToAdd.push({ id: link, title: link });
         newAutoDiscovered.add(link);
         linksToAdd.push({ source: title, target: link });
+        connectionLogger.log(title, link, 'expand');
       });
 
       // Update auto-discovered nodes
@@ -583,6 +522,102 @@ const WikiWebExplorer = () => {
     } catch (err: any) {
       console.error('[Expand] Error:', err);
       setError(`Failed to expand ${title}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Smart Expand: Prioritize adding nodes that are already linked to by other nodes in the graph
+  // or that link back to existing nodes (triangulation).
+  const smartExpandNode = async (title: string) => {
+    console.log(`[Smart Expand] 🧠 Analyzing connections for "${title}"`);
+    setLoading(true);
+
+    try {
+      // 1. Get all links from this node
+      const links = await WikiService.fetchLinks(title);
+
+      // 2. Identify which of these potential new nodes are MOST relevant
+      // Relevance score = number of existing nodes that ALSO link to this candidate
+      // OR existing nodes that this candidate links TO (harder to know without fetching)
+
+      // Get all currently visible nodes
+      const existingNodes = WikiService.getCachedNodes();
+
+      // Candidate scores
+      const scores: Record<string, number> = {};
+
+      // A. Check if candidate is already in the graph (Score +100 - immediate connection)
+      // B. Check if existing nodes link to this candidate (Score +10 per connection)
+
+      links.forEach(candidate => {
+        scores[candidate] = 0;
+
+        // If already in graph, it's a direct link we missed? (Usually auto-added, but good to ensure)
+        if (graphManagerRef.current?.getStats().nodeCount) {
+          // Logic to check if node exists in D3 is needed, or use our sets
+          // We can check if `cache[candidate]` exists, meaning we visited it.
+          if (WikiService.getLinksFromCache(candidate)) {
+            scores[candidate] += 100;
+          }
+        }
+
+        // Check reverse connections from other existing nodes
+        existingNodes.forEach(existing => {
+          if (existing === title) return;
+          const existingLinks = WikiService.getLinksFromCache(existing);
+          if (existingLinks && existingLinks.includes(candidate)) {
+            scores[candidate] += 10;
+          }
+        });
+      });
+
+      // Filter to top candidates
+      const sortedCandidates = links
+        .sort((a, b) => (scores[b] || 0) - (scores[a] || 0))
+        .slice(0, 15); // Take top 15 most relevant
+
+      console.log(`[Smart Expand] Top candidates for ${title}:`, sortedCandidates.map(c => `${c} (${scores[c]})`));
+
+      // Add them
+      const nodesToAdd: GraphNode[] = [];
+      const linksToAdd: Link[] = [];
+      const newAutoDiscovered = new Set<string>();
+
+      sortedCandidates.forEach(link => {
+        // Add node
+        nodesToAdd.push({ id: link, title: link });
+        newAutoDiscovered.add(link);
+
+        // Add link from source
+        linksToAdd.push({ source: title, target: link });
+        connectionLogger.log(title, link, 'expand', scores[link] > 0 ? 2 : 1);
+
+        // Add links from RELEVANT existing nodes (triangulation)
+        existingNodes.forEach(existing => {
+          const existingLinks = WikiService.getLinksFromCache(existing);
+          if (existingLinks && existingLinks.includes(link)) {
+            linksToAdd.push({ source: existing, target: link });
+            connectionLogger.log(existing, link, 'auto', 2);
+          }
+        });
+      });
+
+      if (nodesToAdd.length === 0) {
+        setError('No relevant connections found to add.');
+      } else {
+        if (updateQueueRef.current) {
+          updateQueueRef.current.queueUpdate(nodesToAdd, linksToAdd);
+        }
+        if (newAutoDiscovered.size > 0) {
+          setAutoDiscoveredNodes(prev => new Set([...prev, ...newAutoDiscovered]));
+        }
+        setExpandedNodes(prev => new Set([...prev, title]));
+      }
+
+    } catch (err: any) {
+      console.error('[Smart Expand] Error:', err);
+      setError(`Failed to smart expand ${title}`);
     } finally {
       setLoading(false);
     }
@@ -638,9 +673,12 @@ const WikiWebExplorer = () => {
     // Single Click: Show persistent summary panel
     console.log(`[Click] 📖 Showing summary for "${d.title}"`);
     setClickedNode(d);
-    const result = await fetchSummary(d.title);
+    const result = await WikiService.fetchSummary(d.title);
     setClickedSummary(result.summary);
     setClickedThumbnail(result.thumbnail || '');
+    if (result.thumbnail) {
+      setNodeThumbnails(prev => ({ ...prev, [d.title]: result.thumbnail! }));
+    }
   };
 
   // Handle double-click: Expand node
@@ -656,7 +694,7 @@ const WikiWebExplorer = () => {
       {/* Header */}
       <div className="bg-gray-800 border-b border-gray-700 p-4">
         <h1 className="text-2xl font-bold mb-4 text-blue-400">WikiWeb Explorer</h1>
-        
+
         {/* Search Bar */}
         <div className="flex gap-2">
           <input
@@ -689,6 +727,7 @@ const WikiWebExplorer = () => {
               value={nodeSpacing}
               onChange={(e) => setNodeSpacing(Number(e.target.value))}
               className="w-full"
+              aria-label="Node Spacing"
             />
           </div>
           <div>
@@ -702,6 +741,7 @@ const WikiWebExplorer = () => {
               value={searchDepth}
               onChange={(e) => setSearchDepth(Number(e.target.value))}
               className="w-full"
+              aria-label="Search Depth"
             />
           </div>
         </div>
@@ -725,9 +765,8 @@ const WikiWebExplorer = () => {
         <svg
           ref={svgRef}
           className="w-full h-full"
-          style={{ width: '100%', height: '100%' }}
         />
-        
+
         {/* Persistent Summary Panel (from click) */}
         {clickedNode && (
           <div className="absolute top-4 left-4 max-w-md bg-gray-800 border border-blue-500 rounded p-4 shadow-lg">
@@ -751,13 +790,20 @@ const WikiWebExplorer = () => {
                 onClick={() => window.open(`https://en.wikipedia.org/wiki/${encodeURIComponent(clickedNode.title)}`, '_blank')}
                 className="flex-1 px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-sm"
               >
-                Open in Wikipedia
+                Open Wiki
               </button>
               <button
                 onClick={() => expandNode(clickedNode.id)}
                 className="flex-1 px-3 py-1 bg-purple-600 hover:bg-purple-700 rounded text-sm"
               >
-                Expand Node
+                Expand
+              </button>
+              <button
+                onClick={() => smartExpandNode(clickedNode.id)}
+                className="flex-1 px-3 py-1 bg-green-600 hover:bg-green-700 rounded text-sm"
+                title="Find connections to existing topics"
+              >
+                Smart Expand
               </button>
             </div>
           </div>
@@ -780,17 +826,15 @@ const WikiWebExplorer = () => {
 
         {/* Trash Can Zone */}
         <div
-          className={`absolute bottom-4 left-4 w-32 h-32 rounded-lg border-4 transition-all ${
-            isOverTrash
-              ? 'bg-red-600 border-red-400 scale-110'
-              : 'bg-gray-800 border-gray-600 hover:border-gray-500'
-          }`}
+          className={`absolute bottom-4 left-4 w-32 h-32 rounded-lg border-4 transition-all ${isOverTrash
+            ? 'bg-red-600 border-red-400 scale-110'
+            : 'bg-gray-800 border-gray-600 hover:border-gray-500'
+            }`}
         >
           <div className="flex flex-col items-center justify-center h-full">
             <svg
-              className={`w-16 h-16 transition-colors ${
-                isOverTrash ? 'text-white' : 'text-gray-400'
-              }`}
+              className={`w-16 h-16 transition-colors ${isOverTrash ? 'text-white' : 'text-gray-400'
+                }`}
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -802,11 +846,14 @@ const WikiWebExplorer = () => {
                 d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
               />
             </svg>
-            <p className={`text-xs mt-2 font-semibold ${isOverTrash ? 'text-white' : 'text-gray-400'}`}>
-              {isOverTrash ? 'Release to delete' : 'Drag here to delete'}
-            </p>
+            <span className={`text-sm font-medium mt-2 ${isOverTrash ? 'text-white' : 'text-gray-400'}`}>
+              Drag to Delete
+            </span>
           </div>
         </div>
+
+        {/* Connection Logs Panel */}
+        <LogPanel />
 
         {/* Color Legend */}
         {nodeCount > 0 && (
@@ -818,11 +865,11 @@ const WikiWebExplorer = () => {
                 <span className="text-gray-400">User-typed topics</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#9966ff' }}></div>
+                <div className="w-4 h-4 rounded-full bg-[#9966ff]"></div>
                 <span className="text-gray-400">Auto-discovered</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-4 h-4 rounded-full" style={{ backgroundColor: '#ff00ff' }}></div>
+                <div className="w-4 h-4 rounded-full bg-[#ff00ff]"></div>
                 <span className="text-gray-400">Newly added (2s)</span>
               </div>
               <div className="flex items-center gap-2">
@@ -838,7 +885,7 @@ const WikiWebExplorer = () => {
                 <span className="text-gray-400">Selected for path</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-4 h-4 rounded-full border-2" style={{ borderColor: '#00ffff' }}></div>
+                <div className="w-4 h-4 rounded-full border-2 border-[#00ffff]"></div>
                 <span className="text-gray-400">Expanded node</span>
               </div>
             </div>
@@ -918,7 +965,7 @@ const WikiWebExplorer = () => {
       {/* Footer Stats */}
       <div className="bg-gray-800 border-t border-gray-700 px-4 py-2 text-xs text-gray-400 flex justify-between">
         <span>{nodeCount} nodes • {linkCount} connections</span>
-        <span>Cached: {Object.keys(cacheRef.current).length} topics</span>
+        <span>Cached: {WikiService.getCachedNodes().length} topics</span>
       </div>
     </div>
   );

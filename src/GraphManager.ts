@@ -345,7 +345,7 @@ export class GraphManager {
     linkElements.enter()
       .append('line')
       .attr('stroke', '#444')
-      .attr('stroke-width', 1)
+      .attr('stroke-width', 2)
       .attr('stroke-opacity', 0.6)
       .merge(linkElements as any)
       .attr('stroke', d => {
@@ -357,7 +357,7 @@ export class GraphManager {
         if (sourceMeta?.isInPath && targetMeta?.isInPath) {
           return '#00ff88'; // Green for path
         }
-        return '#444';
+        return '#666'; // Lighter grey for better visibility
       })
       .attr('stroke-width', d => {
         const sourceId = typeof d.source === 'object' ? d.source.id : d.source;
@@ -368,7 +368,7 @@ export class GraphManager {
         if (sourceMeta?.isInPath && targetMeta?.isInPath) {
           return 4; // Thick for path
         }
-        return 1;
+        return 2; // Thicker default
       });
 
     linkElements.exit().remove();
