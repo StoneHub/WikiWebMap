@@ -147,4 +147,29 @@ export class WikiService {
     static getLinksFromCache(title: string): string[] | undefined {
         return this.cache[title];
     }
+
+    /**
+     * Search Wikipedia for titles matching the query (for autocomplete)
+     */
+    static async search(query: string): Promise<string[]> {
+        if (!query || query.length < 2) return [];
+
+        try {
+            const response = await fetch(
+                `https://en.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(
+                    query
+                )}&limit=5&namespace=0&format=json&origin=*`
+            );
+
+            if (!response.ok) return [];
+
+            const data = await response.json();
+            // OpenSearch returns [query, [titles], [descriptions], [urls]]
+            // We just want the titles (index 1)
+            return data[1] || [];
+        } catch (err) {
+            console.error('Search error:', err);
+            return [];
+        }
+    }
 }

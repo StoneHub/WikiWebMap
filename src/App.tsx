@@ -11,6 +11,8 @@ const WikiWebExplorer = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
   const [nodeCount, setNodeCount] = useState<number>(0);
   const [linkCount, setLinkCount] = useState<number>(0);
   const [clickedNode, setClickedNode] = useState<GraphNode | null>(null);
@@ -246,231 +248,157 @@ const WikiWebExplorer = () => {
     }
   };
 
-  // BFS pathfinding with discovered nodes added to map
-  const findPath = async (start: string, end: string) => {
-    const startTime = Date.now();
-    console.log(`[PathFinder] 🚀 Starting BFS from "${start}" to "${end}"`);
+  // Prune graph (remove leaf nodes)
+  const pruneGraph = () => {
+    console.log('[Prune] ✂️ Pruning graph...');
+    if (graphManagerRef.current) {
+      const deletedCount = graphManagerRef.current.pruneNodes();
+      console.log(`[Prune] Deleted ${deletedCount} nodes`);
+      if (deletedCount > 0) {
+        setError(`Pruned ${deletedCount} isolated nodes`);
+        // Clear error message after 3 seconds
+        setTimeout(() => setError(''), 3000);
+      } else {
+        setError('No isolated nodes found to prune');
+        setTimeout(() => setError(''), 3000);
+      }
+    }
+  };
 
-    searchAbortRef.current = false;
-    setLoading(true);
-    setError('');
-    setPathNodes(new Set());
+  // Clean BFS pathfinding - only loads nodes on success
+  const findPath = async (startTitle: string, endTitle: string) => {
+    console.log(`[PathFinder] 🔍 Starting CLEAN path search: "${startTitle}" -> "${endTitle}"`);
 
+    // Reset state
     setSearchProgress({
       isSearching: true,
       currentDepth: 0,
       maxDepth: 6,
-      currentPage: start,
       exploredCount: 0,
+      currentPage: startTitle,
       queueSize: 1,
-      exploredNodes: new Set([start]),
+      exploredNodes: new Set([startTitle])
     });
+    setLoading(true);
+    setPathNodes(new Set());
+    setError('');
+    searchAbortRef.current = false;
+
+    // Internal BFS State
+    const queue: { title: string; depth: number }[] = [{ title: startTitle, depth: 0 }];
+    const visited = new Set<string>([startTitle]);
+    const parentMap = new Map<string, string>(); // child -> parent
+
+    let nodesExplored = 0;
+    const MAX_NODES = 500; // Safety limit
+    const startTime = Date.now();
 
     try {
-      const queue = [[start]];
-      const visited = new Set([start]);
-      const maxDepth = 6;
-      const exploredNodes = new Set([start]);
-      let exploredCount = 0;
-
-      while (queue.length > 0 && !searchAbortRef.current) {
-        const path = queue.shift()!;
-        const current = path[path.length - 1];
-        const currentDepth = path.length;
-
-        exploredCount++;
-
-        // Update progress
-        setSearchProgress(prev => ({
-          ...prev,
-          currentDepth,
-          currentPage: current,
-          exploredCount,
-          queueSize: queue.length,
-        }));
-
-        console.log(`[PathFinder] 📍 Depth ${currentDepth}: Exploring "${current}" (${exploredCount} pages searched, ${queue.length} in queue)`);
-
-        if (currentDepth > maxDepth) {
-          console.log(`[PathFinder] ⚠️ Max depth ${maxDepth} reached`);
-          setError(`No path found within ${maxDepth} steps`);
+      while (queue.length > 0) {
+        if (searchAbortRef.current) {
+          console.log('[PathFinder] 🛑 Search aborted by user');
           break;
         }
 
-        if (current.toLowerCase() === end.toLowerCase()) {
-          const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-          console.log(`[PathFinder] ✅ SUCCESS! Path found in ${path.length} steps`);
-          console.log(`[PathFinder] 🛤️  Path: ${path.join(' → ')}`);
-          console.log(`[PathFinder] 📊 Stats: ${exploredCount} pages explored in ${duration}s`);
+        const { title, depth } = queue.shift()!;
 
+        // Update progress UI sporadically
+        nodesExplored++;
+        if (nodesExplored % 5 === 0) {
           setSearchProgress(prev => ({
             ...prev,
-            isSearching: false,
-            exploredNodes,
+            exploredCount: nodesExplored,
+            currentDepth: depth,
+            currentPage: title,
+            queueSize: queue.length
           }));
-
-          setPathNodes(new Set(path));
-          setError(`Path found: ${path.join(' → ')}`);
-          setLoading(false);
-          return;
+          // Yield to UI
+          await new Promise(r => setTimeout(r, 0));
         }
 
-        let links = [];
-        try {
-          links = await WikiService.fetchLinks(current);
-          console.log(`[PathFinder] 🔗 Found ${links.length} links from "${current}": [${links.slice(0, 5).join(', ')}${links.length > 5 ? '...' : ''}]`);
-        } catch (err: any) {
-          console.error(`[PathFinder] ⚠️ Failed to fetch links for "${current}":`, err.message);
-          // Continue with empty links array
-          continue;
+        if (depth >= 6) continue;
+        if (nodesExplored > MAX_NODES) {
+          throw new Error(`Exceeded exploration limit (${MAX_NODES} nodes) without finding target.`);
         }
 
-        // Add discovered nodes to the graph using UpdateQueue
-        const nodesToAdd: GraphNode[] = [];
-        const linksToAdd: Link[] = [];
-        const newAutoDiscovered = new Set<string>();
+        // Fetch links
+        const links = await WikiService.fetchLinks(title);
 
-        links.forEach((link: string) => {
-          if (!visited.has(link)) {
-            visited.add(link);
-            exploredNodes.add(link);
-            queue.push([...path, link]);
+        for (const link of links) {
+          if (visited.has(link)) continue;
 
-            nodesToAdd.push({ id: link, title: link });
-            newAutoDiscovered.add(link);
-            linksToAdd.push({ source: current, target: link });
-            // Only log if it's part of the exploration path? Or all? 
-            // Logging all explored edges might be too much noise, but requested "persistent logging of what connections are made".
-            connectionLogger.log(current, link, 'path');
-          }
-        });
+          // Found?
+          if (link === endTitle) {
+            console.log(`[PathFinder] 🎉 FOUND PATH!`);
+            parentMap.set(link, title);
 
-        // Update auto-discovered nodes React state
-        if (newAutoDiscovered.size > 0) {
-          setAutoDiscoveredNodes(prev => new Set([...prev, ...newAutoDiscovered]));
-        }
-
-        // Queue the update imperatively
-        if (updateQueueRef.current && nodesToAdd.length > 0) {
-          updateQueueRef.current.queueUpdate(nodesToAdd, linksToAdd);
-        }
-
-        // PURPLE NODE BRANCHING: Fetch links for purple nodes within search depth
-        // This creates exponential growth by exploring touched purple nodes
-        if (currentDepth <= searchDepth) {
-          console.log(`[PathFinder] 🌿 Purple branching at depth ${currentDepth}/${searchDepth}: exploring ${links.length} purple nodes`);
-
-          // Batch purple nodes - collect all changes before updating graph
-          const purpleBatch: {
-            nodes: GraphNode[];
-            links: Link[];
-            autoDiscovered: Set<string>;
-          } = {
-            nodes: [],
-            links: [],
-            autoDiscovered: new Set()
-          };
-
-          // Process purple nodes in batches of 10 to balance performance and visual feedback
-          const batchSize = 10;
-          for (let i = 0; i < links.length; i += batchSize) {
-            if (searchAbortRef.current) break;
-
-            const batch = links.slice(i, i + batchSize);
-
-            // Fetch links for all nodes in this batch
-            await Promise.all(batch.map(async (purpleNode: string) => {
-              // Skip if already cached/handled by WikiService heavily, but we check logic here
-              // WikiService handles caching.
-
-              try {
-                const purpleLinks = await WikiService.fetchLinks(purpleNode);
-                console.log(`[PathFinder] 🟣 Purple node "${purpleNode}" → ${purpleLinks.length} sub-links`);
-
-                // Collect nodes and links for batch update
-                purpleLinks.forEach((subLink: string) => {
-                  // Check if not already in batch - logic remains same
-                  if (!purpleBatch.nodes.find(n => n.id === subLink)) {
-                    purpleBatch.nodes.push({ id: subLink, title: subLink });
-                    purpleBatch.autoDiscovered.add(subLink);
-                  }
-
-                  // Add purple-to-purple edge
-                  purpleBatch.links.push({ source: purpleNode, target: subLink });
-                  connectionLogger.log(purpleNode, subLink, 'path');
-                });
-              } catch (err: any) {
-                console.error(`[PathFinder] ⚠️ Failed to fetch purple links for "${purpleNode}":`, err.message);
-              }
-            }));
-
-            // Update graph with this batch using UpdateQueue
-            if (purpleBatch.nodes.length > 0 || purpleBatch.links.length > 0) {
-              if (updateQueueRef.current) {
-                updateQueueRef.current.queueUpdate(purpleBatch.nodes, purpleBatch.links);
-              }
-
-              // Update auto-discovered set
-              if (purpleBatch.autoDiscovered.size > 0) {
-                setAutoDiscoveredNodes(prev => new Set([...prev, ...purpleBatch.autoDiscovered]));
-
-                // Mark as recently added for visual feedback
-                setRecentlyAddedNodes(prev => new Set([...prev, ...purpleBatch.autoDiscovered]));
-
-                // Clear recently added after 2 seconds
-                const nodesToClear = new Set<string>(purpleBatch.autoDiscovered);
-                setTimeout(() => {
-                  setRecentlyAddedNodes(prev => {
-                    const updated = new Set(prev);
-                    nodesToClear.forEach((node: string) => updated.delete(node));
-                    return updated;
-                  });
-                }, 2000);
-              }
-
-              // Clear batch for next iteration
-              purpleBatch.nodes = [];
-              purpleBatch.links = [];
-              purpleBatch.autoDiscovered = new Set();
-
-              // Small delay for visual feedback - UpdateQueue handles the batching
-              await new Promise(resolve => setTimeout(resolve, 100));
+            // Reconstruct Path
+            const path: string[] = [endTitle];
+            let curr = endTitle;
+            while (curr !== startTitle) {
+              const p = parentMap.get(curr)!;
+              path.unshift(p);
+              curr = p;
             }
+            console.log('[PathFinder] Path:', path.join(' -> '));
+
+            // Add path nodes to graph
+            const newNodes = path.map(p => ({ id: p, title: p }));
+
+            // Add path links
+            const newLinks: Link[] = [];
+            for (let i = 0; i < path.length - 1; i++) {
+              newLinks.push({ source: path[i], target: path[i + 1] });
+              // Log valid connection
+              connectionLogger.log(path[i], path[i + 1], 'path');
+            }
+
+            // Update GraphManager
+            if (graphManagerRef.current) {
+              graphManagerRef.current.addNodes(newNodes);
+              graphManagerRef.current.addLinks(newLinks);
+
+              // Sets metadata for path highlighting
+              setPathNodes(new Set(path));
+
+              const updates = path.map(p => ({
+                nodeId: p,
+                metadata: { isInPath: true }
+              }));
+              graphManagerRef.current.setNodesMetadata(updates);
+
+              // Force highight path nodes (undim them if dimmed)
+              graphManagerRef.current.highlightNode(null); // Reset global dim
+            }
+
+            setSearchProgress(prev => ({ ...prev, isSearching: false }));
+            setLoading(false);
+            return; // Done
           }
+
+          visited.add(link);
+          parentMap.set(link, title);
+          queue.push({ title: link, depth: depth + 1 });
         }
-
-        // Small delay to allow UI updates
-        await new Promise(resolve => setTimeout(resolve, 50));
       }
 
-      if (searchAbortRef.current) {
-        console.log('[PathFinder] 🛑 Search aborted by user');
-        setSearchProgress(prev => ({ ...prev, isSearching: false }));
-        setLoading(false);
-        return;
+      // If loop finishes without return -> Not Found or Aborted
+      if (!searchAbortRef.current) {
+        setError('No path found within search limits.');
       }
-
-      const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-      console.log(`[PathFinder] ❌ No path found after exploring ${exploredCount} pages in ${duration}s`);
-
-      if (!error) {
-        setError('No path found between selected nodes');
-      }
-
-      setSearchProgress(prev => ({
-        ...prev,
-        isSearching: false,
-        exploredNodes,
-      }));
 
     } catch (err: any) {
-      console.error('[PathFinder] 💥 Error:', err);
-      setError(err.message || 'Failed to find path');
-      setSearchProgress(prev => ({ ...prev, isSearching: false }));
+      console.error('[PathFinder] Error:', err);
+      setError(err.message || 'Error during pathfinding');
     } finally {
       setLoading(false);
+      setSearchProgress(prev => ({ ...prev, isSearching: false }));
     }
   };
+
+
+
+
 
   // Expand node: fetch and add its links as sub-web
   const expandNode = async (title: string) => {
@@ -672,6 +600,12 @@ const WikiWebExplorer = () => {
 
     // Single Click: Show persistent summary panel
     console.log(`[Click] 📖 Showing summary for "${d.title}"`);
+
+    // Highlight node and connections
+    if (graphManagerRef.current) {
+      graphManagerRef.current.highlightNode(d.id);
+    }
+
     setClickedNode(d);
     const result = await WikiService.fetchSummary(d.title);
     setClickedSummary(result.summary);
@@ -696,15 +630,53 @@ const WikiWebExplorer = () => {
         <h1 className="text-2xl font-bold mb-4 text-blue-400">WikiWeb Explorer</h1>
 
         {/* Search Bar */}
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && addTopic(searchTerm)}
-            placeholder="Enter Wikipedia topic..."
-            className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded focus:outline-none focus:border-blue-500"
-          />
+        <div className="flex gap-2 relative z-50">
+          <div className="flex-1 relative">
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={async (e) => {
+                const term = e.target.value;
+                setSearchTerm(term);
+                if (term.length >= 2) {
+                  const results = await WikiService.search(term);
+                  setSuggestions(results);
+                  setShowSuggestions(true);
+                } else {
+                  setSuggestions([]);
+                  setShowSuggestions(false);
+                }
+              }}
+              onFocus={() => {
+                if (suggestions.length > 0) setShowSuggestions(true);
+              }}
+              onBlur={() => {
+                // Small delay to allow clicking on suggestions
+                setTimeout(() => setShowSuggestions(false), 200);
+              }}
+              onKeyPress={(e) => e.key === 'Enter' && addTopic(searchTerm)}
+              placeholder="Enter Wikipedia topic..."
+              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded focus:outline-none focus:border-blue-500"
+            />
+            {/* Autocomplete Dropdown */}
+            {showSuggestions && suggestions.length > 0 && (
+              <div className="absolute top-full left-0 right-0 mt-1 bg-gray-800 border border-gray-600 rounded shadow-xl max-h-60 overflow-y-auto">
+                {suggestions.map((suggestion, index) => (
+                  <button
+                    key={index}
+                    className="w-full text-left px-3 py-2 hover:bg-gray-700 text-sm text-gray-200 transition"
+                    onClick={() => {
+                      setSearchTerm(suggestion);
+                      setShowSuggestions(false);
+                      addTopic(suggestion);
+                    }}
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <button
             onClick={() => addTopic(searchTerm)}
             disabled={loading || !searchTerm}
@@ -744,6 +716,17 @@ const WikiWebExplorer = () => {
               aria-label="Search Depth"
             />
           </div>
+        </div>
+
+        {/* Prune Tools */}
+        <div className="mt-3 flex justify-end">
+          <button
+            onClick={pruneGraph}
+            className="px-3 py-1 bg-gray-700 hover:bg-red-900 text-gray-300 hover:text-red-200 rounded text-xs border border-gray-600 hover:border-red-700 transition-colors flex items-center gap-2"
+            title="Remove nodes with fewer than 2 connections"
+          >
+            ✂️ Prune Isolated Nodes
+          </button>
         </div>
 
         {/* Status Messages */}
@@ -806,6 +789,12 @@ const WikiWebExplorer = () => {
                 Smart Expand
               </button>
             </div>
+            <button
+              onClick={() => deleteNodeImperative(clickedNode.id)}
+              className="mt-3 w-full px-3 py-1 bg-red-900/50 hover:bg-red-800 text-red-200 border border-red-800 rounded text-sm flex items-center justify-center gap-2"
+            >
+              🗑️ Delete Node
+            </button>
           </div>
         )}
 

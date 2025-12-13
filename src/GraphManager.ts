@@ -32,6 +32,7 @@ export interface NodeMetadata {
   isRecentlyAdded: boolean;
   isCurrentlyExploring: boolean;
   isSelected: boolean;
+  isDimmed: boolean;
   thumbnail?: string;
 }
 
@@ -149,6 +150,7 @@ export class GraphManager {
             isRecentlyAdded: false,
             isCurrentlyExploring: false,
             isSelected: false,
+            isDimmed: false // Default to false
           });
         }
       }
@@ -218,6 +220,44 @@ export class GraphManager {
   }
 
   /**
+   * Prune nodes with fewer than 2 connections (leaf nodes)
+   * Returns number of deleted nodes
+   */
+  pruneNodes(): number {
+    const nodesToDelete = new Set<string>();
+
+    this.nodes.forEach(node => {
+      const connections = this.links.filter(l => {
+        const sourceId = typeof l.source === 'object' ? l.source.id : l.source;
+        const targetId = typeof l.target === 'object' ? l.target.id : l.target;
+        return sourceId === node.id || targetId === node.id;
+      }).length;
+
+      if (connections < 2) {
+        nodesToDelete.add(node.id);
+      }
+    });
+
+    if (nodesToDelete.size > 0) {
+      this.nodes = this.nodes.filter(n => !nodesToDelete.has(n.id));
+      this.links = this.links.filter(l => {
+        const sourceId = typeof l.source === 'object' ? l.source.id : l.source;
+        const targetId = typeof l.target === 'object' ? l.target.id : l.target;
+        return !nodesToDelete.has(sourceId) && !nodesToDelete.has(targetId);
+      });
+
+      nodesToDelete.forEach(id => this.nodeMetadata.delete(id));
+
+      this.simulation.nodes(this.nodes);
+      (this.simulation.force('link') as d3.ForceLink<Node, Link>).links(this.links);
+      this.updateDOM();
+      this.notifyStats();
+    }
+
+    return nodesToDelete.size;
+  }
+
+  /**
    * Update node metadata for styling
    */
   setNodeMetadata(nodeId: string, metadata: Partial<NodeMetadata>) {
@@ -229,6 +269,7 @@ export class GraphManager {
       isRecentlyAdded: false,
       isCurrentlyExploring: false,
       isSelected: false,
+      isDimmed: false
     };
 
     this.nodeMetadata.set(nodeId, { ...existing, ...metadata });
@@ -248,10 +289,40 @@ export class GraphManager {
         isRecentlyAdded: false,
         isCurrentlyExploring: false,
         isSelected: false,
+        isDimmed: false
       };
 
       this.nodeMetadata.set(nodeId, { ...existing, ...metadata });
     });
+
+    this.updateDOM();
+  }
+
+  /**
+   * Highlight a node and its direct connections
+   */
+  highlightNode(targetNodeId: string | null) {
+    if (targetNodeId === null) {
+      // Reset all dimming
+      this.nodeMetadata.forEach(meta => meta.isDimmed = false);
+    } else {
+      // Find neighbors
+      const neighbors = new Set<string>();
+      this.links.forEach(l => {
+        const sourceId = typeof l.source === 'object' ? l.source.id : l.source;
+        const targetId = typeof l.target === 'object' ? l.target.id : l.target;
+        if (sourceId === targetNodeId) neighbors.add(targetId);
+        if (targetId === targetNodeId) neighbors.add(sourceId);
+      });
+
+      // Apply dimming
+      this.nodes.forEach(n => {
+        const meta = this.nodeMetadata.get(n.id);
+        if (meta) {
+          meta.isDimmed = n.id !== targetNodeId && !neighbors.has(n.id);
+        }
+      });
+    }
 
     this.updateDOM();
   }
@@ -354,10 +425,14 @@ export class GraphManager {
         const sourceMeta = this.nodeMetadata.get(sourceId);
         const targetMeta = this.nodeMetadata.get(targetId);
 
+        if (sourceMeta?.isDimmed || targetMeta?.isDimmed) {
+          return '#333'; // Dimmed color
+        }
+
         if (sourceMeta?.isInPath && targetMeta?.isInPath) {
           return '#00ff88'; // Green for path
         }
-        return '#666'; // Lighter grey for better visibility
+        return '#888'; // Lighter grey for visible
       })
       .attr('stroke-width', d => {
         const sourceId = typeof d.source === 'object' ? d.source.id : d.source;
@@ -365,10 +440,21 @@ export class GraphManager {
         const sourceMeta = this.nodeMetadata.get(sourceId);
         const targetMeta = this.nodeMetadata.get(targetId);
 
+        if (sourceMeta?.isDimmed || targetMeta?.isDimmed) return 1;
+
         if (sourceMeta?.isInPath && targetMeta?.isInPath) {
           return 4; // Thick for path
         }
-        return 2; // Thicker default
+        return 2; // Thicker otherwise
+      })
+      .attr('stroke-opacity', d => {
+        const sourceId = typeof d.source === 'object' ? d.source.id : d.source;
+        const targetId = typeof d.target === 'object' ? d.target.id : d.target;
+        const sourceMeta = this.nodeMetadata.get(sourceId);
+        const targetMeta = this.nodeMetadata.get(targetId);
+
+        if (sourceMeta?.isDimmed || targetMeta?.isDimmed) return 0.1;
+        return 0.8;
       });
 
     linkElements.exit().remove();
@@ -378,8 +464,6 @@ export class GraphManager {
     const nodeGroups = this.nodesGroup
       .selectAll('g')
       .data(this.nodes, (d: any) => d.id);
-
-    console.log(`[GraphManager] updateNodes - enter: ${nodeGroups.enter().size()}, update: ${nodeGroups.size()}, exit: ${nodeGroups.exit().size()}`);
 
     // Enter
     const enter = nodeGroups.enter()
@@ -396,6 +480,9 @@ export class GraphManager {
     merged.each((d, i, nodes) => {
       const group = d3.select(nodes[i]);
       const meta: Partial<NodeMetadata> = this.nodeMetadata.get(d.id) || {};
+
+      // Update opacity based on dimming
+      group.attr('opacity', meta.isDimmed ? 0.2 : 1);
 
       // Calculate radius based on connections
       const connections = this.links.filter(l => {
@@ -465,6 +552,7 @@ export class GraphManager {
     if (meta.isCurrentlyExploring) return 4;
     if (meta.isSelected) return 3;
     if (meta.isExpanded) return 3;
+    if (meta.isDimmed) return 1;
     return 2;
   }
 
