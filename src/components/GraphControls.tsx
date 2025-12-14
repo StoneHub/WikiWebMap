@@ -12,7 +12,6 @@ interface GraphControlsProps {
     apiContactEmail: string;
     setApiContactEmail: (email: string) => void;
     onPrune: () => void;
-    onRunAutoTest: () => void;
 }
 
 export const GraphControls: React.FC<GraphControlsProps> = ({
@@ -27,7 +26,6 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
     apiContactEmail,
     setApiContactEmail,
     onPrune,
-    onRunAutoTest,
 }) => {
     return (
         <div className="absolute bottom-6 right-6 z-20 flex flex-col items-end gap-3">
@@ -111,13 +109,6 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                                 Used for Wikipedia API identification.
                             </div>
                         </div>
-                        {/* Auto Test Button */}
-                        <button
-                            onClick={onRunAutoTest}
-                            className="w-full py-2 bg-purple-900/30 border border-purple-500/50 text-purple-300 text-xs rounded hover:bg-purple-900/50 transition"
-                        >
-                            🛠️ Run Auto-Test (Physics → Science)
-                        </button>
                     </div>
                 </div>
             )}

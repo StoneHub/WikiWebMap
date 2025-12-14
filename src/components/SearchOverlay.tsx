@@ -1,4 +1,5 @@
 import React from 'react';
+import type { SuggestedPath } from '../data/suggestedPaths';
 
 interface SearchOverlayProps {
     searchTerm: string;
@@ -10,6 +11,9 @@ interface SearchOverlayProps {
     setShowSuggestions: (show: boolean) => void;
     onSearchChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
     onAddTopic: (topic: string) => void;
+    featuredPaths: SuggestedPath[];
+    onShuffleFeaturedPaths: () => void;
+    onRunSuggestedPath: (from: string, to: string) => void;
 }
 
 export const SearchOverlay: React.FC<SearchOverlayProps> = ({
@@ -22,6 +26,9 @@ export const SearchOverlay: React.FC<SearchOverlayProps> = ({
     setShowSuggestions,
     onSearchChange,
     onAddTopic,
+    featuredPaths,
+    onShuffleFeaturedPaths,
+    onRunSuggestedPath,
 }) => {
     return (
         <div className="absolute top-6 left-6 z-20 w-96 max-w-full">
@@ -46,6 +53,38 @@ export const SearchOverlay: React.FC<SearchOverlayProps> = ({
                         className="w-full pl-4 pr-4 py-3 bg-gray-900/50 border border-gray-700 rounded-xl focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all text-sm placeholder-gray-500 text-white"
                     />
                 </div>
+
+                {featuredPaths.length > 0 && (
+                    <div className="bg-gray-900/30 border border-gray-700/60 rounded-xl p-3">
+                        <div className="flex items-center justify-between mb-2">
+                            <div className="text-[11px] uppercase tracking-widest text-gray-400 font-semibold">
+                                Try A Path
+                            </div>
+                            <button
+                                onClick={onShuffleFeaturedPaths}
+                                className="text-[11px] text-blue-300 hover:text-blue-200 transition"
+                                type="button"
+                            >
+                                Shuffle
+                            </button>
+                        </div>
+                        <div className="flex flex-col gap-2">
+                            {featuredPaths.map((p, idx) => (
+                                <button
+                                    key={`${p.from}__${p.to}__${idx}`}
+                                    onClick={() => onRunSuggestedPath(p.from, p.to)}
+                                    type="button"
+                                    className="w-full text-left px-3 py-2 rounded-lg bg-black/20 hover:bg-black/30 border border-gray-700/50 text-sm text-gray-200 transition"
+                                    title={p.note || `${p.from} → ${p.to}`}
+                                >
+                                    <span className="font-semibold text-gray-100">{p.from}</span>
+                                    <span className="text-gray-500"> → </span>
+                                    <span className="font-semibold text-gray-100">{p.to}</span>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
 
                 {showSuggestions && suggestions.length > 0 && (
                     <div className="absolute top-full left-0 right-0 mt-2 bg-gray-800/95 backdrop-blur-xl border border-gray-700 rounded-xl shadow-2xl max-h-60 overflow-y-auto overflow-hidden">

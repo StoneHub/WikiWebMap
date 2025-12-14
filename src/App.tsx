@@ -10,7 +10,7 @@ import { LinkContextsLayer } from './components/LinkContextsLayer';
 import { SearchStatusOverlay } from './components/SearchStatusOverlay';
 import type { SearchProgress } from './types/SearchProgress';
 import { runPathfinder } from './features/pathfinding/runPathfinder';
-import { runAutoTest as runAutoTestFeature } from './features/autoTest/runAutoTest';
+import { SUGGESTED_PATHS, type SuggestedPath } from './data/suggestedPaths';
 
 const WikiWebExplorer = () => {
   // UI state
@@ -31,6 +31,7 @@ const WikiWebExplorer = () => {
   const [recentlyAddedNodes] = useState(new Set<string>());
   const [expandedNodes, setExpandedNodes] = useState(new Set<string>());
   const [nodeThumbnails, setNodeThumbnails] = useState<Record<string, string>>({});
+  const [featuredPaths, setFeaturedPaths] = useState<SuggestedPath[]>([]);
 
   // Link Context State
   const [activeLinkContexts, setActiveLinkContexts] = useState<Set<string>>(new Set());
@@ -86,6 +87,7 @@ const WikiWebExplorer = () => {
 
   const undoStackRef = useRef<AppSnapshot[]>([]);
   const redoStackRef = useRef<AppSnapshot[]>([]);
+  const suppressHistoryRef = useRef(false);
   const MAX_HISTORY = 30;
 
   const createSnapshot = (): AppSnapshot | null => {
@@ -134,6 +136,7 @@ const WikiWebExplorer = () => {
   };
 
   const pushHistory = () => {
+    if (suppressHistoryRef.current) return;
     const snap = createSnapshot();
     if (!snap) return;
     undoStackRef.current.push(snap);
@@ -161,6 +164,25 @@ const WikiWebExplorer = () => {
   const [nodeSpacing, setNodeSpacing] = useState(150);
   const [searchDepth, setSearchDepth] = useState(2);
   const [nodeSizeScale, setNodeSizeScale] = useState(1);
+
+  const shuffleFeaturedPaths = () => {
+    const src = SUGGESTED_PATHS;
+    if (src.length === 0) return;
+    const picked: SuggestedPath[] = [];
+    const used = new Set<number>();
+    const count = Math.min(3, src.length);
+    while (picked.length < count && used.size < src.length) {
+      const idx = Math.floor(Math.random() * src.length);
+      if (used.has(idx)) continue;
+      used.add(idx);
+      picked.push(src[idx]);
+    }
+    setFeaturedPaths(picked);
+  };
+
+  useEffect(() => {
+    shuffleFeaturedPaths();
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -549,17 +571,42 @@ const WikiWebExplorer = () => {
       },
     });
 
-  const runAutoTest = () =>
-    runAutoTestFeature({
-      graphManagerRef,
-      addTopic,
-      findPath,
-      setShowSettings,
-      setSearchTerm,
-      setSearchLog,
-      setSearchProgress,
-      setError,
-    });
+  const runSuggestedPath = (from: string, to: string) => {
+    pushHistory();
+    mutationEpochRef.current++;
+    updateQueueRef.current?.clear();
+
+    if (graphManagerRef.current) graphManagerRef.current.clear();
+    setUserTypedNodes(new Set());
+    setAutoDiscoveredNodes(new Set());
+    setExpandedNodes(new Set());
+    setPathNodes(new Set());
+    setBulkSelectedNodes([]);
+    setPathSelectedNodes([]);
+    setClickedNode(null);
+    setClickedSummary('');
+    setActiveLinkContexts(new Set());
+    setSearchDockLinkId(null);
+    setSearchDockPosition(null);
+    setFoundPaths([]);
+    setError('');
+
+    setSearchTerm(`${from} → ${to}`);
+
+    suppressHistoryRef.current = true;
+    setSearchLog([`[SUGGESTED] Seeding "${from}" and "${to}"...`]);
+    setSearchProgress(prev => ({ ...prev, isSearching: true, isPaused: false }));
+
+    void (async () => {
+      try {
+        const [startTitle, endTitle] = await Promise.all([addTopic(from, true), addTopic(to, true)]);
+        setSearchLog(prev => [...prev, `[SUGGESTED] Launching pathfinder...`].slice(-8));
+        await findPath(startTitle || from, endTitle || to);
+      } finally {
+        suppressHistoryRef.current = false;
+      }
+    })();
+  };
 
   const expandNode = async (title: string) => {
     if (expandedNodes.has(title)) {
@@ -718,6 +765,8 @@ const WikiWebExplorer = () => {
         suggestions={suggestions}
         showSuggestions={showSuggestions}
         setShowSuggestions={setShowSuggestions}
+        featuredPaths={featuredPaths}
+        onShuffleFeaturedPaths={shuffleFeaturedPaths}
         onSearchChange={async (e) => {
           const term = e.target.value;
           setSearchTerm(term);
@@ -731,6 +780,7 @@ const WikiWebExplorer = () => {
           }
         }}
         onAddTopic={addTopic}
+        onRunSuggestedPath={runSuggestedPath}
       />
 
       {/* Floating Controls */}
@@ -746,7 +796,6 @@ const WikiWebExplorer = () => {
         apiContactEmail={apiContactEmail}
         setApiContactEmail={setApiContactEmail}
         onPrune={pruneGraph}
-        onRunAutoTest={runAutoTest}
       />
 
       {/* Search Terminal Overlays */}
