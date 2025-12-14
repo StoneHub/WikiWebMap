@@ -1,14 +1,14 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type MutableRefObject } from 'react';
 import type { GraphManager } from '../GraphManager';
 
 type LensingNode = { x: number; y: number; mass: number };
 
 function displacePoint(x: number, y: number, masses: LensingNode[]) {
-  const INFLUENCE_RADIUS = 260;
+  const INFLUENCE_RADIUS = 320;
   const INFLUENCE_R2 = INFLUENCE_RADIUS * INFLUENCE_RADIUS;
-  const SOFTENING = 80 * 80;
-  const G = 1400;
-  const MAX_DISPLACEMENT = 18;
+  const SOFTENING = 120 * 120;
+  const G = 720;
+  const MAX_DISPLACEMENT = 10;
 
   let dxTotal = 0;
   let dyTotal = 0;
@@ -35,7 +35,7 @@ function displacePoint(x: number, y: number, masses: LensingNode[]) {
   return { x: x + dxTotal, y: y + dyTotal };
 }
 
-export function LensingGridBackground(props: { graphManagerRef: React.MutableRefObject<GraphManager | null> }) {
+export function LensingGridBackground(props: { graphManagerRef: MutableRefObject<GraphManager | null> }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rafRef = useRef<number | null>(null);
 
@@ -63,20 +63,16 @@ export function LensingGridBackground(props: { graphManagerRef: React.MutableRef
 
       ctx.clearRect(0, 0, w, h);
 
-      // Base background
-      ctx.fillStyle = 'rgb(9, 10, 16)';
-      ctx.fillRect(0, 0, w, h);
-
       const rawMasses = props.graphManagerRef.current?.getLensingNodes() || [];
       const masses = rawMasses
         .sort((a, b) => b.mass - a.mass)
-        .slice(0, 40);
+        .slice(0, 28);
 
-      const gridSpacing = 64;
-      const sampleStep = 18;
+      const gridSpacing = 72;
+      const sampleStep = 26;
 
       ctx.lineWidth = 1;
-      ctx.strokeStyle = 'rgba(120, 160, 255, 0.10)';
+      ctx.strokeStyle = 'rgba(120, 160, 255, 0.085)';
 
       // Vertical lines
       for (let gx = 0; gx <= w; gx += gridSpacing) {
@@ -100,12 +96,12 @@ export function LensingGridBackground(props: { graphManagerRef: React.MutableRef
         ctx.stroke();
       }
 
-      // Subtle glow around masses
+      // Subtle bloom around strongest masses (kept very light to avoid "gas cloud")
       ctx.globalCompositeOperation = 'lighter';
-      for (const m of masses) {
-        const r = 90 + m.mass * 20;
+      for (const m of masses.slice(0, 12)) {
+        const r = 60 + m.mass * 10;
         const grd = ctx.createRadialGradient(m.x, m.y, 0, m.x, m.y, r);
-        grd.addColorStop(0, 'rgba(80, 140, 255, 0.10)');
+        grd.addColorStop(0, 'rgba(120, 170, 255, 0.045)');
         grd.addColorStop(1, 'rgba(0, 0, 0, 0)');
         ctx.fillStyle = grd;
         ctx.beginPath();
@@ -125,6 +121,5 @@ export function LensingGridBackground(props: { graphManagerRef: React.MutableRef
     };
   }, [props.graphManagerRef]);
 
-  return <canvas ref={canvasRef} className="absolute inset-0 w-full h-full pointer-events-none" />;
+  return <canvas ref={canvasRef} className="absolute inset-0 w-full h-full pointer-events-none opacity-80" />;
 }
-

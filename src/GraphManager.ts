@@ -586,8 +586,10 @@ export class GraphManager {
     const enter = linkElements.enter()
       .append('line')
       .attr('stroke', '#444')
-      .attr('stroke-width', 2)
-      .attr('stroke-opacity', 0.6)
+      .attr('stroke-width', 0)
+      .attr('stroke-opacity', 0)
+      .attr('stroke-dasharray', '8 12')
+      .attr('stroke-dashoffset', 60)
       .style('cursor', 'pointer'); // Link clickability
 
     const merged = enter.merge(linkElements as any);
@@ -620,30 +622,57 @@ export class GraphManager {
         this.applyLinkStyles(el as any, d);
       });
 
-    linkElements.exit().remove();
+    // Animate in newly created links
+    enter
+      .transition()
+      .duration(320)
+      .attr('stroke-width', (d: Link) => this.getLinkStyle(d).strokeWidth)
+      .attr('stroke-opacity', (d: Link) => this.getLinkStyle(d).strokeOpacity)
+      .attr('stroke-dashoffset', 0)
+      .on('end', function () {
+        d3.select(this).attr('stroke-dasharray', null);
+      });
+
+    linkElements
+      .exit()
+      .transition()
+      .duration(200)
+      .attr('stroke-opacity', 0)
+      .remove();
   }
 
-  private applyLinkStyles(selection: d3.Selection<any, Link, any, any>, d: Link) {
+  private getLinkStyle(d: Link) {
     const sourceId = typeof d.source === 'object' ? d.source.id : d.source as string;
     const targetId = typeof d.target === 'object' ? d.target.id : d.target as string;
     const sourceMeta = this.nodeMetadata.get(sourceId);
     const targetMeta = this.nodeMetadata.get(targetId);
 
+    const stroke = (() => {
+      if (sourceMeta?.isDimmed || targetMeta?.isDimmed) return '#555';
+      if (sourceMeta?.isInPath && targetMeta?.isInPath) return '#00ff88';
+      return '#888';
+    })();
+
+    const strokeWidth = (() => {
+      if (sourceMeta?.isDimmed || targetMeta?.isDimmed) return 1;
+      if (sourceMeta?.isInPath && targetMeta?.isInPath) return 4;
+      return 3;
+    })();
+
+    const strokeOpacity = (() => {
+      if (sourceMeta?.isDimmed || targetMeta?.isDimmed) return 0.2;
+      return 0.6;
+    })();
+
+    return { stroke, strokeWidth, strokeOpacity };
+  }
+
+  private applyLinkStyles(selection: d3.Selection<any, Link, any, any>, d: Link) {
+    const style = this.getLinkStyle(d);
     selection
-      .attr('stroke', () => {
-        if (sourceMeta?.isDimmed || targetMeta?.isDimmed) return '#555';
-        if (sourceMeta?.isInPath && targetMeta?.isInPath) return '#00ff88';
-        return '#888';
-      })
-      .attr('stroke-width', () => {
-        if (sourceMeta?.isDimmed || targetMeta?.isDimmed) return 1;
-        if (sourceMeta?.isInPath && targetMeta?.isInPath) return 4;
-        return 3;
-      })
-      .attr('stroke-opacity', () => {
-        if (sourceMeta?.isDimmed || targetMeta?.isDimmed) return 0.2;
-        return 0.6;
-      });
+      .attr('stroke', style.stroke)
+      .attr('stroke-width', style.strokeWidth)
+      .attr('stroke-opacity', style.strokeOpacity);
   }
 
   /**
@@ -679,16 +708,18 @@ export class GraphManager {
     const enter = nodeGroups.enter()
       .append('g')
       .call(this.setupDrag() as any)
+      .attr('class', 'node')
       .style('cursor', 'pointer');
 
     // Merge enter + update
     const merged = enter.merge(nodeGroups as any);
 
-    // Clear and rebuild node contents
+    // Clear and rebuild node contents (keep outer group for translate)
     merged.selectAll('*').remove();
 
     merged.each((d, i, nodes) => {
       const group = d3.select(nodes[i]);
+      const inner = group.append('g').attr('class', 'node-inner');
       const meta: Partial<NodeMetadata> = this.nodeMetadata.get(d.id) || {};
 
       // Update opacity based on dimming
@@ -704,7 +735,7 @@ export class GraphManager {
 
       // Background image circle if thumbnail exists
       if (meta.thumbnail) {
-        group.append('circle')
+        inner.append('circle')
           .attr('r', radius)
           .attr('fill', `url(#img-${this.sanitizeId(d.id)})`)
           .attr('fill-opacity', 0.4);
@@ -712,7 +743,7 @@ export class GraphManager {
 
       // Overlay colored circle
       const color = this.getNodeColor(d.id, meta);
-      group.append('circle')
+      inner.append('circle')
         .attr('r', radius)
         .attr('fill', color)
         .attr('fill-opacity', meta.thumbnail ? 0.3 : 1)
@@ -720,11 +751,25 @@ export class GraphManager {
         .attr('stroke-width', this.getNodeStrokeWidth(meta));
 
       // Text label
-      this.addTextLabel(group, d.title, radius);
+      this.addTextLabel(inner as any, d.title, radius);
     });
 
     // Setup click handlers
     merged
+      .on('mouseenter', (event: MouseEvent) => {
+        if ((event as any).buttons) return;
+        const outer = d3.select(event.currentTarget as any);
+        outer.raise();
+        const inner = outer.select('g.node-inner');
+        inner.interrupt();
+        inner.transition().duration(120).attr('transform', 'scale(1.18)');
+      })
+      .on('mouseleave', (event: MouseEvent) => {
+        const outer = d3.select(event.currentTarget as any);
+        const inner = outer.select('g.node-inner');
+        inner.interrupt();
+        inner.transition().duration(150).attr('transform', 'scale(1)');
+      })
       .on('click', (event: MouseEvent, d) => {
         if (!event.defaultPrevented && this.callbacks.onNodeClick) {
           this.callbacks.onNodeClick(d, event);
@@ -738,7 +783,25 @@ export class GraphManager {
       });
 
     // Exit
-    nodeGroups.exit().remove();
+    enter
+      .attr('opacity', 0)
+      .transition()
+      .duration(220)
+      .attr('opacity', 1);
+
+    enter
+      .select('g.node-inner')
+      .attr('transform', 'scale(0.88)')
+      .transition()
+      .duration(240)
+      .attr('transform', 'scale(1)');
+
+    nodeGroups
+      .exit()
+      .transition()
+      .duration(200)
+      .attr('opacity', 0)
+      .remove();
   }
 
   private getNodeColor(_nodeId: string, meta: Partial<NodeMetadata>): string {
@@ -898,7 +961,7 @@ export class GraphManager {
       .attr('y2', (d: any) => d.target.y);
 
     // Update node positions
-    this.nodesGroup.selectAll('g')
+    this.nodesGroup.selectAll('g.node')
       .attr('transform', (d: any) => `translate(${d.x},${d.y})`);
   }
 

@@ -8,6 +8,7 @@ import { GraphControls } from './components/GraphControls';
 import { NodeDetailsPanel } from './components/NodeDetailsPanel';
 import { LinkContextsLayer } from './components/LinkContextsLayer';
 import { SearchStatusOverlay } from './components/SearchStatusOverlay';
+import { LensingGridBackground } from './components/LensingGridBackground';
 import type { SearchProgress } from './types/SearchProgress';
 import { runPathfinder } from './features/pathfinding/runPathfinder';
 import { SUGGESTED_PATHS, type SuggestedPath } from './data/suggestedPaths';
@@ -771,6 +772,7 @@ const WikiWebExplorer = () => {
   return (
     <div className="w-screen h-screen bg-gray-900 text-white relative overflow-hidden font-sans">
       <div className="absolute inset-0 z-0">
+        <LensingGridBackground graphManagerRef={graphManagerRef} />
         <svg ref={svgRef} className="w-full h-full" />
       </div>
 
