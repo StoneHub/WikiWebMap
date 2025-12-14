@@ -29,3 +29,4 @@ jobs:
           firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_POSSIBLE_HAVEN_471616_F0 }}'
           channelId: live
           projectId: possible-haven-471616-f0
+          target: wikiconnectionsmap

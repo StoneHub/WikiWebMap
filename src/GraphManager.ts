@@ -14,7 +14,7 @@ export interface Node {
 export interface Link {
   source: string | Node;
   target: string | Node;
-  id?: string;
+  id: string; // Made required for easier tracking
   type?: string; // 'manual', 'auto', 'expand', 'path'
   context?: string; // Text context from Wikipedia
 }
@@ -26,6 +26,7 @@ export interface GraphCallbacks {
   onNodeDragEnd?: (node: Node, isOverTrash: boolean) => void;
   onLinkClick?: (link: Link, event: MouseEvent) => void;
   onStatsUpdate?: (stats: { nodeCount: number; linkCount: number }) => void;
+  onSelectionChange?: (selectedNodes: Node[]) => void;
 }
 
 export interface NodeMetadata {
@@ -49,7 +50,9 @@ export class GraphManager {
   private g!: d3.Selection<SVGGElement, unknown, null, undefined>;
   private linksGroup!: d3.Selection<SVGGElement, unknown, null, undefined>;
   private nodesGroup!: d3.Selection<SVGGElement, unknown, null, undefined>;
+  private nodesGroup!: d3.Selection<SVGGElement, unknown, null, undefined>;
   private defs!: d3.Selection<SVGDefsElement, unknown, null, undefined>;
+  private brushGroup!: d3.Selection<SVGGElement, unknown, null, undefined>;
 
   private simulation!: d3.Simulation<Node, Link>;
   private nodes: Node[] = [];
@@ -96,12 +99,24 @@ export class GraphManager {
     // Setup zoom
     const zoom = d3.zoom<SVGSVGElement, unknown>()
       .scaleExtent([0.1, 4])
+      .filter((event) => !event.shiftKey) // Disable zoom on Shift (for selection)
       .on('zoom', (event) => {
         this.g.attr('transform', event.transform);
       });
 
-    this.svg.call(zoom);
+    this.svg.call(zoom)
+      .on('dblclick.zoom', null); // Disable double click zoom
 
+    // Selection Brush Logic
+    this.brushGroup = this.svg.append('g').attr('class', 'brush-layer');
+
+    const selectionDrag = d3.drag<SVGSVGElement, unknown>()
+      .filter(event => event.shiftKey) // Only enable on Shift
+      .on('start', (event) => this.dragSelectionStart(event))
+      .on('drag', (event) => this.dragSelectionMove(event))
+      .on('end', (event) => this.dragSelectionEnd(event));
+
+    this.svg.call(selectionDrag);
     // Create groups for links and nodes
     this.linksGroup = this.g.append('g').attr('class', 'links');
     this.nodesGroup = this.g.append('g').attr('class', 'nodes');
@@ -190,6 +205,8 @@ export class GraphManager {
         });
 
         if (!existingLink) {
+          // Ensure ID exists
+          if (!link.id) link.id = `${sourceId}-${targetId}`;
           this.links.push(link);
           added++;
         } else {
@@ -284,8 +301,88 @@ export class GraphManager {
       isDimmed: false
     };
 
-    this.nodeMetadata.set(nodeId, { ...existing, ...metadata });
-    this.updateDOM(); // Re-render to apply new styles
+    const newMeta = { ...existing, ...metadata };
+    this.nodeMetadata.set(nodeId, newMeta);
+
+    // Re-render specifically this node (optimization could be better but this is safe)
+    this.updateNodes();
+    this.updateLinks(); // Update styles
+  }
+
+
+  // --- Selection Brush Handling ---
+  private selectionStartPoint: { x: number, y: number } | null = null;
+
+  private dragSelectionStart(event: any) {
+    const { x, y } = event; // Screen coords relative to SVG
+    this.selectionStartPoint = { x, y };
+
+    this.brushGroup.selectAll('rect').remove();
+    this.brushGroup.append('rect')
+      .attr('x', x)
+      .attr('y', y)
+      .attr('width', 0)
+      .attr('height', 0)
+      .attr('fill', 'rgba(0, 100, 255, 0.1)')
+      .attr('stroke', 'rgba(0, 100, 255, 0.5)')
+      .attr('stroke-dasharray', '4');
+  }
+
+  private dragSelectionMove(event: any) {
+    if (!this.selectionStartPoint) return;
+    const { x, y } = event;
+    const start = this.selectionStartPoint;
+
+    const minX = Math.min(start.x, x);
+    const minY = Math.min(start.y, y);
+    const width = Math.abs(x - start.x);
+    const height = Math.abs(y - start.y);
+
+    this.brushGroup.select('rect')
+      .attr('x', minX)
+      .attr('y', minY)
+      .attr('width', width)
+      .attr('height', height);
+  }
+
+  private dragSelectionEnd(event: any) {
+    if (!this.selectionStartPoint) return;
+
+    const end = { x: event.x, y: event.y };
+    const start = this.selectionStartPoint;
+
+    // Calculate selection box in Screen Space
+    const x0 = Math.min(start.x, end.x);
+    const x1 = Math.max(start.x, end.x);
+    const y0 = Math.min(start.y, end.y);
+    const y1 = Math.max(start.y, end.y);
+
+    // Clear brush visual
+    this.brushGroup.selectAll('rect').remove();
+    this.selectionStartPoint = null;
+
+    // Determine nodes within box
+    // Need to transform node coordinates (World Space) to Screen Space
+    // OR transform Box to World Space.
+    // Let's transform Nodes to Screen Space.
+
+    const transform = d3.zoomTransform(this.svg.node()!);
+
+    const selectedNodes: Node[] = [];
+
+    this.nodes.forEach(node => {
+      if (node.x === undefined || node.y === undefined) return;
+      const screenX = transform.applyX(node.x);
+      const screenY = transform.applyY(node.y);
+
+      if (screenX >= x0 && screenX <= x1 && screenY >= y0 && screenY <= y1) {
+        selectedNodes.push(node);
+      }
+    });
+
+    if (this.callbacks.onSelectionChange) {
+      this.callbacks.onSelectionChange(selectedNodes);
+    }
   }
 
   /**
@@ -432,54 +529,82 @@ export class GraphManager {
 
     const merged = enter.merge(linkElements as any);
 
+    // Initial style application
+    merged.each((d, i, nodes) => {
+      this.applyLinkStyles(d3.select(nodes[i]) as any, d);
+    });
+
+    /* removed individual attr chains in favor of centralized applyLinkStyles for reusability in mouseout */
+
+
+    // Link events
     merged
-      .attr('stroke', d => {
-        const sourceId = typeof d.source === 'object' ? d.source.id : d.source;
-        const targetId = typeof d.target === 'object' ? d.target.id : d.target;
-        const sourceMeta = this.nodeMetadata.get(sourceId);
-        const targetMeta = this.nodeMetadata.get(targetId);
-
-        if (sourceMeta?.isDimmed || targetMeta?.isDimmed) {
-          return '#555';
+      .on('click', (event, d) => {
+        event.stopPropagation();
+        if (this.callbacks.onLinkClick) {
+          this.callbacks.onLinkClick(d, event);
         }
+      })
+      .on('mouseover', function () {
+        d3.select(this)
+          .attr('stroke', '#00ffff')
+          .attr('stroke-width', 6)
+          .attr('stroke-opacity', 1);
+      })
+      .on('mouseout', (event, d) => {
+        // Re-apply original styles based on metadata
+        const el = d3.select(event.currentTarget);
+        this.applyLinkStyles(el as any, d);
+      });
 
-        if (sourceMeta?.isInPath && targetMeta?.isInPath) {
-          return '#00ff88';
-        }
+    linkElements.exit().remove();
+  }
+
+  private applyLinkStyles(selection: d3.Selection<any, Link, any, any>, d: Link) {
+    const sourceId = typeof d.source === 'object' ? d.source.id : d.source as string;
+    const targetId = typeof d.target === 'object' ? d.target.id : d.target as string;
+    const sourceMeta = this.nodeMetadata.get(sourceId);
+    const targetMeta = this.nodeMetadata.get(targetId);
+
+    selection
+      .attr('stroke', () => {
+        if (sourceMeta?.isDimmed || targetMeta?.isDimmed) return '#555';
+        if (sourceMeta?.isInPath && targetMeta?.isInPath) return '#00ff88';
         return '#888';
       })
-      .attr('stroke-width', d => {
-        const sourceId = typeof d.source === 'object' ? d.source.id : d.source;
-        const targetId = typeof d.target === 'object' ? d.target.id : d.target;
-        const sourceMeta = this.nodeMetadata.get(sourceId);
-        const targetMeta = this.nodeMetadata.get(targetId);
-
+      .attr('stroke-width', () => {
         if (sourceMeta?.isDimmed || targetMeta?.isDimmed) return 1;
-
-        if (sourceMeta?.isInPath && targetMeta?.isInPath) {
-          return 4;
-        }
+        if (sourceMeta?.isInPath && targetMeta?.isInPath) return 4;
         return 3;
       })
-      .attr('stroke-opacity', d => {
-        const sourceId = typeof d.source === 'object' ? d.source.id : d.source;
-        const targetId = typeof d.target === 'object' ? d.target.id : d.target;
-        const sourceMeta = this.nodeMetadata.get(sourceId);
-        const targetMeta = this.nodeMetadata.get(targetId);
-
+      .attr('stroke-opacity', () => {
         if (sourceMeta?.isDimmed || targetMeta?.isDimmed) return 0.2;
         return 0.6;
       });
+  }
 
-    // Link events
-    merged.on('click', (event, d) => {
-      event.stopPropagation();
-      if (this.callbacks.onLinkClick) {
-        this.callbacks.onLinkClick(d, event);
-      }
-    });
+  /**
+   * Get the current screen coordinates of a link's midpoint
+   */
+  getLinkScreenCoordinates(linkId: string): { x: number, y: number } | null {
+    const link = this.links.find(l => l.id === linkId);
+    if (!link) return null;
 
-    linkElements.exit().remove();
+    const source = link.source as Node;
+    const target = link.target as Node;
+
+    if (source.x === undefined || source.y === undefined || target.x === undefined || target.y === undefined) return null;
+
+    // Calculate midpoint in SVG coordinates
+    const midX = (source.x + target.x) / 2;
+    const midY = (source.y + target.y) / 2;
+
+    // Apply zoom transform to get screen coordinates
+    const transform = d3.zoomTransform(this.svg.node()!);
+    const screenX = transform.applyX(midX);
+    const screenY = transform.applyY(midY);
+
+    return { x: screenX, y: screenY };
   }
 
   private updateNodes() {

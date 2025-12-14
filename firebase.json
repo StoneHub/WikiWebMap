@@ -1,5 +1,6 @@
 {
     "hosting": {
+        "site": "wikiconnectionsmap",
         "public": "dist",
         "ignore": [
             "firebase.json",

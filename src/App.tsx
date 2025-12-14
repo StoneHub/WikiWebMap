@@ -3,6 +3,10 @@ import { GraphManager, Node as GraphNode, Link } from './GraphManager';
 import { UpdateQueue } from './UpdateQueue';
 import { WikiService, LinkWithContext } from './WikiService';
 import './index.css';
+import { SearchOverlay } from './components/SearchOverlay';
+import { GraphControls } from './components/GraphControls';
+import { NodeDetailsPanel } from './components/NodeDetailsPanel';
+import { LinkContextPopup } from './components/LinkContextPopup';
 
 const WikiWebExplorer = () => {
   // UI state
@@ -14,9 +18,7 @@ const WikiWebExplorer = () => {
   const [nodeCount, setNodeCount] = useState<number>(0);
   const [linkCount, setLinkCount] = useState<number>(0);
   const [clickedNode, setClickedNode] = useState<GraphNode | null>(null);
-  const [clickedLink, setClickedLink] = useState<Link | null>(null);
   const [clickedSummary, setClickedSummary] = useState('');
-  const [clickedThumbnail, setClickedThumbnail] = useState('');
   const [selectedNodes, setSelectedNodes] = useState<GraphNode[]>([]);
   const [pathNodes, setPathNodes] = useState(new Set<string>());
   const [userTypedNodes, setUserTypedNodes] = useState(new Set<string>());
@@ -24,6 +26,10 @@ const WikiWebExplorer = () => {
   const [recentlyAddedNodes] = useState(new Set<string>());
   const [expandedNodes, setExpandedNodes] = useState(new Set<string>());
   const [nodeThumbnails, setNodeThumbnails] = useState<Record<string, string>>({});
+
+  // Link Context State
+  const [activeLinkContexts, setActiveLinkContexts] = useState<Set<string>>(new Set());
+  const [linkContextPositions, setLinkContextPositions] = useState<Record<string, { x: number, y: number }>>({});
 
   // Search Progress State
   const [searchProgress, setSearchProgress] = useState({
@@ -45,6 +51,7 @@ const WikiWebExplorer = () => {
   const graphManagerRef = useRef<GraphManager | null>(null);
   const updateQueueRef = useRef<UpdateQueue | null>(null);
   const searchAbortRef = useRef(false);
+  const animationFrameRef = useRef<number>();
 
   // Visual settings
   const [nodeSpacing, setNodeSpacing] = useState(150);
@@ -71,7 +78,36 @@ const WikiWebExplorer = () => {
 
     updateQueueRef.current = new UpdateQueue(graphManagerRef.current, 500);
 
+    // Start tracking loop for link popups
+    const trackPopups = () => {
+      if (activeLinkContexts.size > 0 && graphManagerRef.current) {
+        const newPositions: Record<string, { x: number, y: number }> = {};
+        let hasChanges = false;
+
+        activeLinkContexts.forEach(linkId => {
+          const pos = graphManagerRef.current!.getLinkScreenCoordinates(linkId);
+          if (pos) {
+            newPositions[linkId] = pos;
+            if (
+              !linkContextPositions[linkId] ||
+              Math.abs(linkContextPositions[linkId].x - pos.x) > 1 ||
+              Math.abs(linkContextPositions[linkId].y - pos.y) > 1
+            ) {
+              hasChanges = true;
+            }
+          }
+        });
+
+        if (hasChanges) {
+          setLinkContextPositions(prev => ({ ...prev, ...newPositions }));
+        }
+      }
+      animationFrameRef.current = requestAnimationFrame(trackPopups);
+    };
+    trackPopups();
+
     return () => {
+      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
       if (graphManagerRef.current) {
         graphManagerRef.current.destroy();
         graphManagerRef.current = null;
@@ -81,7 +117,7 @@ const WikiWebExplorer = () => {
         updateQueueRef.current = null;
       }
     };
-  }, []);
+  }, [activeLinkContexts]); // Re-bind tracker if set size changes (optimization)
 
   // Sync settings
   useEffect(() => {
@@ -165,6 +201,7 @@ const WikiWebExplorer = () => {
         newLinks.push({
           source: resolvedTitle,
           target: linkObj.title,
+          id: `${resolvedTitle}-${linkObj.title}`,
           type: 'manual',
           context: linkObj.context
         });
@@ -181,6 +218,7 @@ const WikiWebExplorer = () => {
           newLinks.push({
             source: existingNodeId,
             target: resolvedTitle,
+            id: `${existingNodeId}-${resolvedTitle}`,
             type: 'auto',
             context: match.context
           });
@@ -323,7 +361,13 @@ const WikiWebExplorer = () => {
               const target = path[i + 1];
               const sourceLinks = WikiService.getLinksFromCache(source);
               const context = sourceLinks?.find(l => l.title === target)?.context;
-              newLinks.push({ source, target, type: 'path', context });
+              newLinks.push({
+                source,
+                target,
+                id: `${source}-${target}`,
+                type: 'path',
+                context
+              });
             }
 
             if (graphManagerRef.current) {
@@ -452,12 +496,24 @@ const WikiWebExplorer = () => {
         const link = linkObj.title;
         nodesToAdd.push({ id: link, title: link });
         newAutoDiscovered.add(link);
-        linksToAdd.push({ source: title, target: link, type: 'expand', context: linkObj.context });
+        linksToAdd.push({
+          source: title,
+          target: link,
+          id: `${title}-${link}`,
+          type: 'expand',
+          context: linkObj.context
+        });
 
         existingNodes.forEach(existing => {
           const existingLinks = WikiService.getLinksFromCache(existing);
           const match = existingLinks?.find(l => l.title === link);
-          if (match) linksToAdd.push({ source: existing, target: link, type: 'auto', context: match.context });
+          if (match) linksToAdd.push({
+            source: existing,
+            target: link,
+            id: `${existing}-${link}`,
+            type: 'auto',
+            context: match.context
+          });
         });
       });
 
@@ -477,7 +533,8 @@ const WikiWebExplorer = () => {
   const handleNodeClick = async (event: any, d: GraphNode) => {
     if (event.defaultPrevented) return;
     event.stopPropagation();
-    setClickedLink(null);
+    // setClickedLink(null); // No longer clearing single link
+
 
     if (event.ctrlKey || event.metaKey) {
       window.open(`https://en.wikipedia.org/wiki/${encodeURIComponent(d.title)}`, '_blank');
@@ -492,7 +549,7 @@ const WikiWebExplorer = () => {
           newSelection.splice(index, 1);
           setPathNodes(new Set());
           setError('');
-          setClickedLink(null);
+          // setClickedLink(null);
         } else {
           newSelection.push(d);
           if (newSelection.length > 2) newSelection.shift();
@@ -501,12 +558,12 @@ const WikiWebExplorer = () => {
         if (newSelection.length === 2) {
           const [n1, n2] = newSelection;
           const directLink = graphManagerRef.current?.getLinkBetween(n1.id, n2.id);
-          if (directLink) setClickedLink(directLink);
-          else setClickedLink(null);
-
+          if (directLink) {
+            // Optional: Auto-open context here?
+          }
           findPath(n1.id, n2.id);
         } else {
-          setPathNodes(new Set()); setError(''); setClickedLink(null);
+          setPathNodes(new Set()); setError('');
         }
         return newSelection;
       });
@@ -518,14 +575,23 @@ const WikiWebExplorer = () => {
     setClickedNode(d);
     const result = await WikiService.fetchSummary(d.title);
     setClickedSummary(result.summary);
-    setClickedThumbnail(result.thumbnail || '');
+    // setClickedThumbnail(result.thumbnail || '');
     if (result.thumbnail) setNodeThumbnails(prev => ({ ...prev, [d.title]: result.thumbnail! }));
   };
 
   const handleLinkClick = (event: any, d: Link) => {
     event.stopPropagation();
-    setClickedNode(null);
-    setClickedLink(d);
+
+    // Toggle link context
+    if (!d.id) return; // Should have ID now
+    const isOn = activeLinkContexts.has(d.id);
+
+    setActiveLinkContexts(prev => {
+      const next = new Set(prev);
+      if (isOn) next.delete(d.id!);
+      else next.add(d.id!);
+      return next;
+    });
   };
 
   const handleNodeDoubleClick = (event: any, d: GraphNode) => {
@@ -540,117 +606,40 @@ const WikiWebExplorer = () => {
       </div>
 
       {/* Floating Search */}
-      <div className="absolute top-6 left-6 z-20 w-96 max-w-full">
-        <div className="bg-gray-800/90 backdrop-blur-md border border-gray-700 shadow-2xl rounded-2xl p-4 flex flex-col gap-3">
-          <h1 className="text-xl font-bold text-blue-400 bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-500">WikiWeb Explorer</h1>
-
-          <div className="relative">
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={async (e) => {
-                const term = e.target.value;
-                setSearchTerm(term);
-                if (term.length >= 2) {
-                  const results = await WikiService.search(term);
-                  setSuggestions(results);
-                  setShowSuggestions(true);
-                } else {
-                  setSuggestions([]);
-                  setShowSuggestions(false);
-                }
-              }}
-              onFocus={() => { if (suggestions.length > 0) setShowSuggestions(true); }}
-              onBlur={() => { setTimeout(() => setShowSuggestions(false), 200); }}
-              onKeyPress={(e) => e.key === 'Enter' && addTopic(searchTerm)}
-              placeholder="Evaluate topic..."
-              className="w-full pl-4 pr-4 py-3 bg-gray-900/50 border border-gray-700 rounded-xl focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all text-sm placeholder-gray-500"
-            />
-          </div>
-
-          {showSuggestions && suggestions.length > 0 && (
-            <div className="absolute top-full left-0 right-0 mt-2 bg-gray-800/95 backdrop-blur-xl border border-gray-700 rounded-xl shadow-2xl max-h-60 overflow-y-auto overflow-hidden">
-              {suggestions.map((suggestion, index) => (
-                <button
-                  key={index}
-                  className="w-full text-left px-4 py-3 hover:bg-gray-700/50 text-sm text-gray-200 transition border-b border-gray-700/50 last:border-0"
-                  onClick={() => {
-                    setSearchTerm(suggestion);
-                    setShowSuggestions(false);
-                    addTopic(suggestion);
-                  }}
-                >
-                  {suggestion}
-                </button>
-              ))}
-            </div>
-          )}
-
-          <button
-            onClick={() => addTopic(searchTerm)}
-            disabled={loading || !searchTerm}
-            className="w-full py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl text-sm font-semibold shadow-lg transition-all transform active:scale-95"
-          >
-            {loading ? 'Thinking...' : 'Start Exploration'}
-          </button>
-
-          {error && (
-            <div className={`text-xs px-2 py-1 rounded bg-red-900/20 border border-red-500/30 ${error.startsWith('Path found') ? 'text-green-400 border-green-500/30' : 'text-red-400'}`}>
-              {error}
-            </div>
-          )}
-        </div>
-      </div>
+      <SearchOverlay
+        searchTerm={searchTerm}
+        setSearchTerm={setSearchTerm}
+        loading={loading}
+        error={error}
+        suggestions={suggestions}
+        showSuggestions={showSuggestions}
+        setShowSuggestions={setShowSuggestions}
+        onSearchChange={async (e) => {
+          const term = e.target.value;
+          setSearchTerm(term);
+          if (term.length >= 2) {
+            const results = await WikiService.search(term);
+            setSuggestions(results);
+            setShowSuggestions(true);
+          } else {
+            setSuggestions([]);
+            setShowSuggestions(false);
+          }
+        }}
+        onAddTopic={addTopic}
+      />
 
       {/* Floating Controls */}
-      <div className="absolute bottom-6 right-6 z-20 flex flex-col items-end gap-3">
-        <button
-          onClick={() => setShowSettings(!showSettings)}
-          className="w-12 h-12 bg-gray-800/80 backdrop-blur-md border border-gray-600/50 rounded-full shadow-xl flex items-center justify-center hover:bg-gray-700 text-gray-300 transition-all hover:scale-105"
-          title="Settings"
-        >
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path></svg>
-        </button>
-
-        {/* Settings Bubble */}
-        {showSettings && (
-          <div className="bg-gray-800/90 backdrop-blur-md border border-gray-700/50 rounded-2xl p-4 shadow-2xl w-64 mb-1 animate-fade-in-up">
-            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">Graph Physics</h3>
-            <div className="space-y-4">
-              <div>
-                <div className="flex justify-between text-xs text-gray-400 mb-1">
-                  <span>Spacing</span>
-                  <span>{nodeSpacing}px</span>
-                </div>
-                <input type="range" min="80" max="300" value={nodeSpacing} onChange={(e) => setNodeSpacing(Number(e.target.value))} className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer" />
-              </div>
-              <div>
-                <div className="flex justify-between text-xs text-gray-400 mb-1">
-                  <span>Recursion Depth</span>
-                  <span>{searchDepth}</span>
-                </div>
-                <input type="range" min="1" max="3" value={searchDepth} onChange={(e) => setSearchDepth(Number(e.target.value))} className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer" />
-              </div>
-              {/* Auto Test Button */}
-              <button
-                onClick={runAutoTest}
-                className="w-full py-2 bg-purple-900/30 border border-purple-500/50 text-purple-300 text-xs rounded hover:bg-purple-900/50 transition"
-              >
-                🛠️ Run Auto-Test (Facebook)
-              </button>
-            </div>
-          </div>
-        )}
-
-        <button
-          onClick={pruneGraph}
-          className="h-12 px-6 bg-gray-800/80 hover:bg-red-900/80 backdrop-blur-md border border-gray-600/50 hover:border-red-500/50 rounded-full shadow-xl flex items-center gap-2 text-gray-200 hover:text-white transition-all hover:scale-105"
-          title="Clean up isolated nodes"
-        >
-          <span className="text-lg">✂️</span>
-          <span className="font-semibold text-sm">Prune</span>
-        </button>
-      </div>
+      <GraphControls
+        showSettings={showSettings}
+        setShowSettings={setShowSettings}
+        nodeSpacing={nodeSpacing}
+        setNodeSpacing={setNodeSpacing}
+        searchDepth={searchDepth}
+        setSearchDepth={setSearchDepth}
+        onPrune={pruneGraph}
+        onRunAutoTest={runAutoTest}
+      />
 
       {/* Search Terminal Overlays */}
       {searchProgress.isSearching && (
@@ -688,78 +677,30 @@ const WikiWebExplorer = () => {
       )}
 
       {/* Floating Node Details - Side Panel */}
-      {clickedNode && (
-        <div className="absolute top-6 right-6 z-30 w-80 max-w-[90vw]">
-          <div className="bg-gray-800/95 backdrop-blur-xl border border-gray-600/50 rounded-2xl shadow-2xl overflow-hidden flex flex-col animate-fade-in-right">
-            <div className="relative h-40 bg-gray-900 skeleton-loader">
-              {clickedThumbnail ? (
-                <img src={clickedThumbnail} alt={clickedNode.title} className="w-full h-full object-cover" />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center text-gray-600 text-4xl font-serif italic">W</div>
-              )}
-              <button onClick={() => setClickedNode(null)} className="absolute top-2 right-2 bg-black/50 hover:bg-black/70 rounded-full p-1 text-white backdrop-blur-sm transition">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-              </button>
-            </div>
+      <NodeDetailsPanel
+        clickedNode={clickedNode}
+        clickedSummary={clickedSummary}
+        nodeThumbnails={nodeThumbnails}
+        onClose={() => setClickedNode(null)}
+        onExpand={expandNode}
+        onDelete={deleteNodeImperative}
+      />
 
-            <div className="p-5">
-              <h2 className="text-xl font-bold text-white mb-2 leading-tight">{clickedNode.title}</h2>
-              <p className="text-sm text-gray-300 mb-4 leading-relaxed max-h-40 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-transparent pr-2">
-                {clickedSummary || 'Loading summary...'}
-              </p>
-              <div className="grid grid-cols-2 gap-2">
-                <button onClick={() => window.open(`https://en.wikipedia.org/wiki/${encodeURIComponent(clickedNode.title)}`, '_blank')} className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-xl text-xs font-medium transition">Read Article ↗</button>
-                <button onClick={() => expandNode(clickedNode.id)} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-xl text-xs font-medium transition shadow-lg shadow-indigo-500/20">Expand</button>
-              </div>
-              <button onClick={() => deleteNodeImperative(clickedNode.id)} className="mt-3 w-full py-2 bg-red-500/10 hover:bg-red-500/20 text-red-300 rounded-xl text-xs transition border border-red-500/20">Remove from Graph</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Attached Link Contexts */}
+      {Array.from(activeLinkContexts).map(linkId => {
+        const position = linkContextPositions[linkId];
+        const link = graphManagerRef.current?.getLinkBetween(linkId.split('-')[0], linkId.split('-')[1]);
+        if (!position || !link) return null;
 
-      {/* Link Context Dialog */}
-      {clickedLink && (
-        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-40 max-w-lg w-full p-4 animate-pop-in">
-          <div className="bg-gray-900/95 backdrop-blur-2xl border border-green-500/50 rounded-3xl p-6 shadow-2xl relative overflow-hidden">
-            <div className="absolute -top-10 -right-10 w-40 h-40 bg-green-500/10 rounded-full blur-3xl pointer-events-none"></div>
-            <button onClick={() => setClickedLink(null)} className="absolute top-4 right-4 p-2 bg-gray-800/50 rounded-full text-gray-400 hover:text-white hover:bg-gray-700 transition" title="Close"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
-
-            <div className="relative z-10">
-              <div className="flex items-center gap-3 mb-6">
-                <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-green-500 to-emerald-700 flex items-center justify-center text-white shadow-lg shadow-green-900/50">
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
-                </div>
-                <div>
-                  <h3 className="text-xs font-bold text-green-400 uppercase tracking-widest mb-1">Connection Verification</h3>
-                  <div className="text-lg font-bold text-white flex items-center gap-2">
-                    <span>{typeof clickedLink.source === 'object' ? clickedLink.source.title : clickedLink.source}</span>
-                    <span className="text-gray-500 text-sm">linked to</span>
-                    <span>{typeof clickedLink.target === 'object' ? clickedLink.target.title : clickedLink.target}</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-4">
-                <div className="bg-gray-800/60 rounded-xl p-4 border border-gray-700/50">
-                  <h4 className="text-[10px] uppercase text-gray-500 font-bold mb-2 flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-blue-400"></span>Evidence (Source Text)</h4>
-                  <p className="text-sm text-gray-200 italic leading-relaxed font-serif border-l-2 border-blue-500/50 pl-3">"{clickedLink.context || 'Context text unavailable via API.'}"</p>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-gray-800/60 rounded-xl p-3 border border-gray-700/50">
-                    <h4 className="text-[10px] uppercase text-gray-500 font-bold mb-1">Determination Method</h4>
-                    <p className="text-xs text-gray-300">Direct Hyperlink in Source Article</p>
-                  </div>
-                  <div className="bg-gray-800/60 rounded-xl p-3 border border-gray-700/50">
-                    <h4 className="text-[10px] uppercase text-gray-500 font-bold mb-1">Link Type</h4>
-                    <p className="text-xs text-gray-300 capitalize">{clickedLink.type || 'Manual'} Connection</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+        return (
+          <LinkContextPopup
+            key={linkId}
+            link={link}
+            position={position}
+            onClose={() => setActiveLinkContexts(prev => { const n = new Set(prev); n.delete(linkId); return n; })}
+          />
+        );
+      })}
 
     </div>
   );
