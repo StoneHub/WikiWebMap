@@ -33,6 +33,7 @@ const WikiWebExplorer = () => {
   const [expandedNodes, setExpandedNodes] = useState(new Set<string>());
   const [nodeThumbnails, setNodeThumbnails] = useState<Record<string, string>>({});
   const [featuredPaths, setFeaturedPaths] = useState<SuggestedPath[]>([]);
+  const [showFeaturedPaths, setShowFeaturedPaths] = useState(true);
 
   // Link Context State
   const [activeLinkContexts, setActiveLinkContexts] = useState<Set<string>>(new Set());
@@ -451,6 +452,12 @@ const WikiWebExplorer = () => {
     }
   };
 
+  const addTopicFromSearchUI = (title: string) => {
+    setShowFeaturedPaths(false);
+    setShowSuggestions(false);
+    return addTopic(title);
+  };
+
   const deleteNodeImperative = (nodeId: string) => {
     pushHistory();
     if (graphManagerRef.current) {
@@ -601,6 +608,8 @@ const WikiWebExplorer = () => {
     setFoundPaths([]);
     setError('');
 
+    setShowFeaturedPaths(false);
+    setShowSuggestions(false);
     setSearchTerm(`${from} → ${to}`);
 
     suppressHistoryRef.current = true;
@@ -787,6 +796,9 @@ const WikiWebExplorer = () => {
         setShowSuggestions={setShowSuggestions}
         featuredPaths={featuredPaths}
         onShuffleFeaturedPaths={shuffleFeaturedPaths}
+        showFeaturedPaths={showFeaturedPaths}
+        onFocusSearch={() => setShowFeaturedPaths(true)}
+        onBlurSearch={() => setShowFeaturedPaths(false)}
         onSearchChange={async (e) => {
           const term = e.target.value;
           setSearchTerm(term);
@@ -799,7 +811,7 @@ const WikiWebExplorer = () => {
             setShowSuggestions(false);
           }
         }}
-        onAddTopic={addTopic}
+        onAddTopic={addTopicFromSearchUI}
         onRunSuggestedPath={runSuggestedPath}
       />
 

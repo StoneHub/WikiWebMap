@@ -14,6 +14,9 @@ interface SearchOverlayProps {
     featuredPaths: SuggestedPath[];
     onShuffleFeaturedPaths: () => void;
     onRunSuggestedPath: (from: string, to: string) => void;
+    showFeaturedPaths: boolean;
+    onFocusSearch: () => void;
+    onBlurSearch: () => void;
 }
 
 export const SearchOverlay: React.FC<SearchOverlayProps> = ({
@@ -29,6 +32,9 @@ export const SearchOverlay: React.FC<SearchOverlayProps> = ({
     featuredPaths,
     onShuffleFeaturedPaths,
     onRunSuggestedPath,
+    showFeaturedPaths,
+    onFocusSearch,
+    onBlurSearch,
 }) => {
     return (
         <div className="absolute top-6 left-6 z-20 w-96 max-w-full">
@@ -44,9 +50,11 @@ export const SearchOverlay: React.FC<SearchOverlayProps> = ({
                         onChange={onSearchChange}
                         onFocus={() => {
                             if (suggestions.length > 0) setShowSuggestions(true);
+                            onFocusSearch();
                         }}
                         onBlur={() => {
                             setTimeout(() => setShowSuggestions(false), 200);
+                            setTimeout(() => onBlurSearch(), 200);
                         }}
                         onKeyPress={(e) => e.key === 'Enter' && onAddTopic(searchTerm)}
                         placeholder="Evaluate topic..."
@@ -54,8 +62,8 @@ export const SearchOverlay: React.FC<SearchOverlayProps> = ({
                     />
                 </div>
 
-                {featuredPaths.length > 0 && (
-                    <div className="bg-gray-900/30 border border-gray-700/60 rounded-xl p-3">
+                {showFeaturedPaths && featuredPaths.length > 0 && searchTerm.trim().length === 0 && (
+                    <div className="bg-gray-900/30 border border-gray-700/60 rounded-xl p-3 animate-fade-in-up">
                         <div className="flex items-center justify-between mb-2">
                             <div className="text-[11px] uppercase tracking-widest text-gray-400 font-semibold">
                                 Try A Path
