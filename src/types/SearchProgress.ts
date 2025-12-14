@@ -1,5 +1,7 @@
 export type SearchProgress = {
   isSearching: boolean;
+  isPaused: boolean;
+  keepSearching: boolean;
   currentDepth: number;
   maxDepth: number;
   currentPage: string;
@@ -7,4 +9,3 @@ export type SearchProgress = {
   queueSize: number;
   exploredNodes: Set<string>;
 };
-

@@ -18,7 +18,7 @@ export async function runAutoTest(args: {
 
   args.setSearchTerm('Auto-Test Running...');
   args.setSearchLog(['[TEST] 🧪 Starting Protocol verify_fix_1...']);
-  args.setSearchProgress(prev => ({ ...prev, isSearching: true, exploredCount: 0 }));
+  args.setSearchProgress(prev => ({ ...prev, isSearching: true, isPaused: false, exploredCount: 0 }));
 
   try {
     args.setSearchLog(prev => [...prev, '[TEST] Seeding start node: "Physics"...']);

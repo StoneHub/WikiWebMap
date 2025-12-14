@@ -65,13 +65,13 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                         </div>
                         <div>
                             <div className="flex justify-between text-xs text-gray-400 mb-1">
-                                <span>Recursion Depth</span>
+                                <span>Max Depth</span>
                                 <span>{searchDepth}</span>
                             </div>
                             <input
                                 type="range"
                                 min="1"
-                                max="3"
+                                max="6"
                                 value={searchDepth}
                                 onChange={(e) => setSearchDepth(Number(e.target.value))}
                                 className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"

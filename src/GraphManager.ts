@@ -37,6 +37,8 @@ export interface NodeMetadata {
   isRecentlyAdded: boolean;
   isCurrentlyExploring: boolean;
   isSelected: boolean;
+  isPathEndpoint: boolean;
+  isBulkSelected: boolean;
   isDimmed: boolean;
   thumbnail?: string;
 }
@@ -98,7 +100,7 @@ export class GraphManager {
     // Setup zoom
     const zoom = d3.zoom<SVGSVGElement, unknown>()
       .scaleExtent([0.1, 4])
-      .filter((event) => !event.shiftKey) // Disable zoom on Shift (for selection)
+      .filter((event) => !event.altKey) // Disable zoom on Alt/Option (for box selection)
       .on('zoom', (event) => {
         this.g.attr('transform', event.transform);
       });
@@ -110,7 +112,7 @@ export class GraphManager {
     this.brushGroup = this.svg.append('g').attr('class', 'brush-layer');
 
     const selectionDrag = d3.drag<SVGSVGElement, unknown>()
-      .filter(event => event.shiftKey) // Only enable on Shift
+      .filter(event => event.altKey) // Only enable on Alt/Option
       .on('start', (event) => this.dragSelectionStart(event))
       .on('drag', (event) => this.dragSelectionMove(event))
       .on('end', (event) => this.dragSelectionEnd(event));
@@ -168,6 +170,8 @@ export class GraphManager {
             isRecentlyAdded: false,
             isCurrentlyExploring: false,
             isSelected: false,
+            isPathEndpoint: false,
+            isBulkSelected: false,
             isDimmed: false // Default to false
           });
         }
@@ -297,6 +301,8 @@ export class GraphManager {
       isRecentlyAdded: false,
       isCurrentlyExploring: false,
       isSelected: false,
+      isPathEndpoint: false,
+      isBulkSelected: false,
       isDimmed: false
     };
 
@@ -322,8 +328,8 @@ export class GraphManager {
       .attr('y', y)
       .attr('width', 0)
       .attr('height', 0)
-      .attr('fill', 'rgba(0, 100, 255, 0.1)')
-      .attr('stroke', 'rgba(0, 100, 255, 0.5)')
+      .attr('fill', 'rgba(255, 136, 0, 0.12)')
+      .attr('stroke', 'rgba(255, 136, 0, 0.65)')
       .attr('stroke-dasharray', '4');
   }
 
@@ -397,6 +403,8 @@ export class GraphManager {
         isRecentlyAdded: false,
         isCurrentlyExploring: false,
         isSelected: false,
+        isPathEndpoint: false,
+        isBulkSelected: false,
         isDimmed: false
       };
 
@@ -680,7 +688,8 @@ export class GraphManager {
   private getNodeColor(_nodeId: string, meta: Partial<NodeMetadata>): string {
     if (meta.isInPath) return '#00ff88'; // Green for path
     if (meta.isCurrentlyExploring) return '#ffdd00'; // Yellow for currently exploring
-    if (meta.isSelected) return '#ff8800'; // Orange for selected
+    if (meta.isPathEndpoint) return '#00ffff'; // Cyan for path endpoints
+    if (meta.isBulkSelected) return '#ff8800'; // Orange for bulk-selected
     if (meta.isRecentlyAdded) return '#ff00ff'; // Magenta for newly added
     if (meta.isUserTyped) return '#0088ff'; // Blue for user-typed
     if (meta.isAutoDiscovered) return '#9966ff'; // Purple for auto-discovered
@@ -688,7 +697,8 @@ export class GraphManager {
   }
 
   private getNodeStroke(meta: Partial<NodeMetadata>): string {
-    if (meta.isSelected) return '#ffff00'; // Yellow stroke for selected
+    if (meta.isPathEndpoint) return '#00ffff'; // Cyan stroke for endpoints
+    if (meta.isBulkSelected) return '#ffff00'; // Yellow stroke for bulk-selected
     if (meta.isCurrentlyExploring) return '#ff6600'; // Orange stroke for exploring
     if (meta.isExpanded) return '#00ffff'; // Cyan for expanded
     return '#fff';
@@ -696,7 +706,8 @@ export class GraphManager {
 
   private getNodeStrokeWidth(meta: Partial<NodeMetadata>): number {
     if (meta.isCurrentlyExploring) return 4;
-    if (meta.isSelected) return 3;
+    if (meta.isPathEndpoint) return 5;
+    if (meta.isBulkSelected) return 3;
     if (meta.isExpanded) return 3;
     if (meta.isDimmed) return 1;
     return 2;

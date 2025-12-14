@@ -6,14 +6,18 @@ import type { SearchProgress } from '../../types/SearchProgress';
 export async function runPathfinder(args: {
   startInput: string;
   endInput: string;
+  maxDepth: number;
+  keepSearching: boolean;
   graphManagerRef: MutableRefObject<GraphManager | null>;
   searchAbortRef: MutableRefObject<boolean>;
+  searchPauseRef: MutableRefObject<boolean>;
   setLoading: Dispatch<SetStateAction<boolean>>;
   setSearchLog: Dispatch<SetStateAction<string[]>>;
   setSearchProgress: Dispatch<SetStateAction<SearchProgress>>;
   setPathNodes: Dispatch<SetStateAction<Set<string>>>;
   setError: Dispatch<SetStateAction<string>>;
   setPathSelectedNodes: Dispatch<SetStateAction<Node[]>>;
+  onFoundPath?: (args: { triggerLinkId: string; path: string[] }) => void;
 }) {
   args.setLoading(true);
   args.setSearchLog(['Initializing PathFinder protocol...']);
@@ -35,8 +39,10 @@ export async function runPathfinder(args: {
 
   args.setSearchProgress({
     isSearching: true,
+    isPaused: false,
+    keepSearching: args.keepSearching,
     currentDepth: 0,
-    maxDepth: 6,
+    maxDepth: args.maxDepth,
     exploredCount: 0,
     currentPage: startTitle,
     queueSize: 1,
@@ -45,15 +51,20 @@ export async function runPathfinder(args: {
   args.setPathNodes(new Set());
   args.setError('');
   args.searchAbortRef.current = false;
+  args.searchPauseRef.current = false;
 
   const queue: { title: string; depth: number }[] = [{ title: startTitle, depth: 0 }];
   const visited = new Set<string>([startTitle]);
   const parentMap = new Map<string, string>();
+  const foundPathIds = new Set<string>();
   let nodesExplored = 0;
 
   try {
     while (queue.length > 0) {
       if (args.searchAbortRef.current) break;
+      while (args.searchPauseRef.current && !args.searchAbortRef.current) {
+        await new Promise(r => setTimeout(r, 120));
+      }
       const { title, depth } = queue.shift()!;
 
       nodesExplored++;
@@ -75,7 +86,7 @@ export async function runPathfinder(args: {
         await new Promise(r => setTimeout(r, 0));
       }
 
-      if (depth >= 6) continue;
+      if (depth >= args.maxDepth) continue;
       if (nodesExplored > 500) throw new Error(`Exceeded exploration limit (500 nodes).`);
 
       const links = await WikiService.fetchLinks(title);
@@ -121,10 +132,24 @@ export async function runPathfinder(args: {
             args.graphManagerRef.current.highlightNode(null);
           }
 
-          args.setPathSelectedNodes([]);
-          args.setSearchProgress(prev => ({ ...prev, isSearching: false }));
-          args.setLoading(false);
-          return;
+          const triggerLinkId = `${title}-${endTitle}`;
+          const pathId = path.join(' -> ');
+          if (!foundPathIds.has(pathId)) {
+            foundPathIds.add(pathId);
+            args.setSearchLog(prev => [...prev, `[FOUND] Path #${foundPathIds.size} (len ${path.length})`].slice(-8));
+            args.onFoundPath?.({ triggerLinkId, path });
+          }
+
+          if (!args.keepSearching) {
+            args.setPathSelectedNodes([]);
+            args.setSearchProgress(prev => ({ ...prev, isSearching: false, isPaused: false }));
+            args.setLoading(false);
+            return;
+          }
+
+          // Continue exploring for additional connections.
+          // Keep the BFS tree as-is to avoid exponential blowup.
+          continue;
         }
 
         visited.add(link);
@@ -142,7 +167,6 @@ export async function runPathfinder(args: {
     args.setSearchLog(prev => [...prev, `[ERROR] ${err.message}`]);
   } finally {
     args.setLoading(false);
-    args.setSearchProgress(prev => ({ ...prev, isSearching: false }));
+    args.setSearchProgress(prev => ({ ...prev, isSearching: false, isPaused: false }));
   }
 }
-

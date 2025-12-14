@@ -39,6 +39,8 @@ const WikiWebExplorer = () => {
   // Search Progress State
   const [searchProgress, setSearchProgress] = useState<SearchProgress>({
     isSearching: false,
+    isPaused: false,
+    keepSearching: false,
     currentDepth: 0,
     maxDepth: 6,
     currentPage: '',
@@ -47,6 +49,10 @@ const WikiWebExplorer = () => {
     exploredNodes: new Set<string>(),
   });
   const [searchLog, setSearchLog] = useState<string[]>([]); // Granular log
+  const [searchDockLinkId, setSearchDockLinkId] = useState<string | null>(null);
+  const [searchDockPosition, setSearchDockPosition] = useState<{ x: number; y: number } | null>(null);
+  const [foundPaths, setFoundPaths] = useState<Array<{ triggerLinkId: string; path: string[] }>>([]);
+  const [keepSearching, setKeepSearching] = useState(false);
 
   // Settings Visibility
   const [showSettings, setShowSettings] = useState(false);
@@ -61,11 +67,27 @@ const WikiWebExplorer = () => {
   const graphManagerRef = useRef<GraphManager | null>(null);
   const updateQueueRef = useRef<UpdateQueue | null>(null);
   const searchAbortRef = useRef(false);
+  const searchPauseRef = useRef(false);
   const animationFrameRef = useRef<number>();
+  const activeLinkContextsRef = useRef<Set<string>>(new Set());
+  const linkContextPositionsRef = useRef<Record<string, { x: number; y: number }>>({});
+  const searchDockLinkIdRef = useRef<string | null>(null);
 
   // Visual settings
   const [nodeSpacing, setNodeSpacing] = useState(150);
   const [searchDepth, setSearchDepth] = useState(2);
+
+  useEffect(() => {
+    activeLinkContextsRef.current = activeLinkContexts;
+  }, [activeLinkContexts]);
+
+  useEffect(() => {
+    linkContextPositionsRef.current = linkContextPositions;
+  }, [linkContextPositions]);
+
+  useEffect(() => {
+    searchDockLinkIdRef.current = searchDockLinkId;
+  }, [searchDockLinkId]);
 
   // Initialize GraphManager
   useEffect(() => {
@@ -89,20 +111,23 @@ const WikiWebExplorer = () => {
 
     updateQueueRef.current = new UpdateQueue(graphManagerRef.current, 500);
 
-    // Start tracking loop for link popups
+    // Start tracking loop for link popups + docked search dialog
     const trackPopups = () => {
-      if (activeLinkContexts.size > 0 && graphManagerRef.current) {
+      const activeIds = activeLinkContextsRef.current;
+      const dockLinkId = searchDockLinkIdRef.current;
+
+      if ((activeIds.size > 0 || dockLinkId) && graphManagerRef.current) {
         const newPositions: Record<string, { x: number, y: number }> = {};
         let hasChanges = false;
 
-        activeLinkContexts.forEach(linkId => {
+        activeIds.forEach(linkId => {
           const pos = graphManagerRef.current!.getLinkScreenCoordinates(linkId);
           if (pos) {
             newPositions[linkId] = pos;
             if (
-              !linkContextPositions[linkId] ||
-              Math.abs(linkContextPositions[linkId].x - pos.x) > 1 ||
-              Math.abs(linkContextPositions[linkId].y - pos.y) > 1
+              !linkContextPositionsRef.current[linkId] ||
+              Math.abs(linkContextPositionsRef.current[linkId].x - pos.x) > 1 ||
+              Math.abs(linkContextPositionsRef.current[linkId].y - pos.y) > 1
             ) {
               hasChanges = true;
             }
@@ -110,7 +135,16 @@ const WikiWebExplorer = () => {
         });
 
         if (hasChanges) {
-          setLinkContextPositions(prev => ({ ...prev, ...newPositions }));
+          setLinkContextPositions(prev => {
+            const next = { ...prev, ...newPositions };
+            linkContextPositionsRef.current = next;
+            return next;
+          });
+        }
+
+        if (dockLinkId) {
+          const pos = graphManagerRef.current!.getLinkScreenCoordinates(dockLinkId);
+          if (pos) setSearchDockPosition(pos);
         }
       }
       animationFrameRef.current = requestAnimationFrame(trackPopups);
@@ -128,7 +162,7 @@ const WikiWebExplorer = () => {
         updateQueueRef.current = null;
       }
     };
-  }, [activeLinkContexts]); // Re-bind tracker if set size changes (optimization)
+  }, []); // Initialize once; tracking uses refs
 
   // Sync settings
   useEffect(() => {
@@ -172,6 +206,8 @@ const WikiWebExplorer = () => {
         isInPath: pathNodes.has(nodeId),
         isRecentlyAdded: recentlyAddedNodes.has(nodeId),
         isSelected: selectedNodeIds.has(nodeId),
+        isPathEndpoint: pathSelectedNodes.some(n => n.id === nodeId),
+        isBulkSelected: bulkSelectedNodes.some(n => n.id === nodeId),
         isCurrentlyExploring: searchProgress.currentPage === nodeId && searchProgress.isSearching,
         thumbnail: nodeThumbnails[nodeId],
       },
@@ -293,26 +329,53 @@ const WikiWebExplorer = () => {
 
   const cancelSearch = () => {
     searchAbortRef.current = true;
+    searchPauseRef.current = false;
+    setSearchDockLinkId(null);
+    setSearchDockPosition(null);
+    setFoundPaths([]);
     setError('Search cancelled');
     setSearchLog(prev => [...prev, `[USER] Abort command received.`]);
     setTimeout(() => {
-      setSearchProgress(prev => ({ ...prev, isSearching: false }));
+      setSearchProgress(prev => ({ ...prev, isSearching: false, isPaused: false }));
       setPathSelectedNodes([]);
     }, 1000);
   }
+
+  const pauseSearch = () => {
+    searchPauseRef.current = true;
+    setSearchProgress(prev => ({ ...prev, isPaused: true }));
+    setSearchLog(prev => [...prev, `[USER] Pause command received.`].slice(-8));
+  };
+
+  const resumeSearch = () => {
+    searchPauseRef.current = false;
+    setSearchProgress(prev => ({ ...prev, isPaused: false }));
+    setSearchLog(prev => [...prev, `[USER] Resume command received.`].slice(-8));
+  };
+
+  useEffect(() => {
+    setSearchProgress(prev => ({ ...prev, keepSearching }));
+  }, [keepSearching]);
 
   const findPath = (startInput: string, endInput: string) =>
     runPathfinder({
       startInput,
       endInput,
+      maxDepth: searchDepth,
+      keepSearching,
       graphManagerRef,
       searchAbortRef,
+      searchPauseRef,
       setLoading,
       setSearchLog,
       setSearchProgress,
       setPathNodes,
       setError,
       setPathSelectedNodes,
+      onFoundPath: (found) => {
+        setFoundPaths(prev => [...prev, found]);
+        setSearchDockLinkId(prev => prev ?? found.triggerLinkId);
+      },
     });
 
   const runAutoTest = () =>
@@ -512,6 +575,13 @@ const WikiWebExplorer = () => {
         nodeCount={nodeCount}
         linkCount={linkCount}
         onCancelSearch={cancelSearch}
+        onPauseSearch={pauseSearch}
+        onResumeSearch={resumeSearch}
+        dockPosition={searchDockPosition || undefined}
+        isDocked={Boolean(searchDockLinkId && searchDockPosition)}
+        keepSearching={keepSearching}
+        onToggleKeepSearching={() => setKeepSearching(v => !v)}
+        foundCount={foundPaths.length}
       />
 
       {/* Floating Node Details - Side Panel */}
