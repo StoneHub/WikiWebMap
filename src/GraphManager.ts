@@ -19,6 +19,11 @@ export interface Link {
   context?: string; // Text context from Wikipedia
 }
 
+export type GraphStateSnapshot = {
+  nodes: Node[];
+  links: Array<Omit<Link, 'source' | 'target'> & { source: string; target: string }>;
+};
+
 export interface GraphCallbacks {
   onNodeClick?: (node: Node, event: MouseEvent) => void;
   onNodeDoubleClick?: (node: Node, event: MouseEvent) => void;
@@ -66,6 +71,7 @@ export class GraphManager {
   private width: number;
   private height: number;
   private nodeSpacing: number = 150;
+  private nodeSizeScale: number = 1;
 
   // Drag state
   private dragThreshold = 5;
@@ -140,7 +146,7 @@ export class GraphManager {
           (typeof l.source === 'object' ? l.source.id : l.source) === node.id ||
           (typeof l.target === 'object' ? l.target.id : l.target) === node.id
         ).length;
-        return Math.min(30 + connections * 0.5, 60) + 15;
+        return (Math.min(30 + connections * 0.5, 60) * this.nodeSizeScale) + 15;
       }))
       .on('tick', () => this.onTick());
   }
@@ -452,6 +458,13 @@ export class GraphManager {
     this.simulation.alpha(0.3).restart();
   }
 
+  setNodeSizeScale(scale: number) {
+    const next = Number.isFinite(scale) ? Math.min(2, Math.max(0.4, scale)) : 1;
+    this.nodeSizeScale = next;
+    this.updateDOM();
+    this.simulation.alpha(0.3).restart();
+  }
+
   /**
    * Get current graph statistics
    */
@@ -474,6 +487,35 @@ export class GraphManager {
     (this.simulation.force('link') as d3.ForceLink<Node, Link>).links(this.links);
     this.updateDOM();
     this.notifyStats();
+  }
+
+  getStateSnapshot(): GraphStateSnapshot {
+    const nodes = this.nodes.map(n => ({ ...n }));
+    const links = this.links.map(l => {
+      const source = typeof l.source === 'object' ? l.source.id : l.source;
+      const target = typeof l.target === 'object' ? l.target.id : l.target;
+      return {
+        ...l,
+        source,
+        target,
+      };
+    });
+    return { nodes, links };
+  }
+
+  setStateSnapshot(snapshot: GraphStateSnapshot) {
+    this.clear();
+    this.addNodes(snapshot.nodes.map(n => ({ ...n })));
+    this.addLinks(
+      snapshot.links.map(l => ({
+        ...l,
+        source: l.source,
+        target: l.target,
+      }))
+    );
+    this.updateDOM();
+    this.notifyStats();
+    this.simulation.alpha(0.3).restart();
   }
 
   /**
@@ -644,7 +686,7 @@ export class GraphManager {
         const targetId = typeof l.target === 'object' ? l.target.id : l.target;
         return sourceId === d.id || targetId === d.id;
       }).length;
-      const radius = Math.min(30 + connections * 0.5, 60);
+      const radius = Math.min(30 + connections * 0.5, 60) * this.nodeSizeScale;
 
       // Background image circle if thumbnail exists
       if (meta.thumbnail) {
@@ -664,7 +706,7 @@ export class GraphManager {
         .attr('stroke-width', this.getNodeStrokeWidth(meta));
 
       // Text label
-      this.addTextLabel(group, d.title);
+      this.addTextLabel(group, d.title, radius);
     });
 
     // Setup click handlers
@@ -713,17 +755,17 @@ export class GraphManager {
     return 2;
   }
 
-  private addTextLabel(group: d3.Selection<SVGGElement, any, any, any>, title: string) {
+  private addTextLabel(group: d3.Selection<SVGGElement, any, any, any>, title: string, radius: number) {
     const textElement = group.append('text')
       .attr('text-anchor', 'middle')
       .attr('fill', '#ffffff')
-      .attr('font-size', '9px')
+      .attr('font-size', `${Math.max(7, 9 * this.nodeSizeScale)}px`)
       .attr('font-weight', 'bold')
       .attr('pointer-events', 'none');
 
     // Simple text wrapping
     const words = title.split(/\s+/);
-    const maxCharsPerLine = 10;
+    const maxCharsPerLine = Math.max(6, Math.round(10 * (radius / (45 * this.nodeSizeScale || 1))));
     const maxLines = 3;
     let lines: string[] = [];
     let currentLine = '';
@@ -744,7 +786,7 @@ export class GraphManager {
       lines[maxLines - 1] = lines[maxLines - 1].substring(0, maxCharsPerLine - 2) + '...';
     }
 
-    const lineHeight = 10;
+    const lineHeight = Math.max(8, 10 * this.nodeSizeScale);
     const totalHeight = lines.length * lineHeight;
     const startY = -(totalHeight / 2) + (lineHeight / 2);
 

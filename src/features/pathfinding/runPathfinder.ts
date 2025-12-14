@@ -7,7 +7,7 @@ export async function runPathfinder(args: {
   startInput: string;
   endInput: string;
   maxDepth: number;
-  keepSearching: boolean;
+  keepSearchingRef: MutableRefObject<boolean>;
   graphManagerRef: MutableRefObject<GraphManager | null>;
   searchAbortRef: MutableRefObject<boolean>;
   searchPauseRef: MutableRefObject<boolean>;
@@ -40,7 +40,7 @@ export async function runPathfinder(args: {
   args.setSearchProgress({
     isSearching: true,
     isPaused: false,
-    keepSearching: args.keepSearching,
+    keepSearching: args.keepSearchingRef.current,
     currentDepth: 0,
     maxDepth: args.maxDepth,
     exploredCount: 0,
@@ -54,10 +54,34 @@ export async function runPathfinder(args: {
   args.searchPauseRef.current = false;
 
   const queue: { title: string; depth: number }[] = [{ title: startTitle, depth: 0 }];
-  const visited = new Set<string>([startTitle]);
-  const parentMap = new Map<string, string>();
-  const foundPathIds = new Set<string>();
+  const depthByNode = new Map<string, number>([[startTitle, 0]]);
+  const parentsByNode = new Map<string, Set<string>>();
+  let foundDepth: number | null = null;
   let nodesExplored = 0;
+
+  const buildPaths = (maxPaths: number) => {
+    const results: string[][] = [];
+    const stack: string[] = [endTitle];
+
+    const dfs = (current: string) => {
+      if (results.length >= maxPaths) return;
+      if (current === startTitle) {
+        results.push([...stack].reverse());
+        return;
+      }
+      const parents = parentsByNode.get(current);
+      if (!parents || parents.size === 0) return;
+      for (const parent of parents) {
+        stack.push(parent);
+        dfs(parent);
+        stack.pop();
+        if (results.length >= maxPaths) return;
+      }
+    };
+
+    dfs(endTitle);
+    return results;
+  };
 
   try {
     while (queue.length > 0) {
@@ -66,6 +90,11 @@ export async function runPathfinder(args: {
         await new Promise(r => setTimeout(r, 120));
       }
       const { title, depth } = queue.shift()!;
+
+      if (foundDepth !== null && depth >= foundDepth) {
+        // We've already found the shortest path length; no need to explore deeper for more shortest paths.
+        break;
+      }
 
       nodesExplored++;
       if (nodesExplored % 3 === 0) {
@@ -82,6 +111,7 @@ export async function runPathfinder(args: {
           currentDepth: depth,
           currentPage: title,
           queueSize: queue.length,
+          keepSearching: args.keepSearchingRef.current,
         }));
         await new Promise(r => setTimeout(r, 0));
       }
@@ -93,78 +123,83 @@ export async function runPathfinder(args: {
 
       for (const linkObj of links) {
         const link = linkObj.title;
-        if (visited.has(link)) continue;
+        const nextDepth = depth + 1;
+        if (nextDepth > args.maxDepth) continue;
 
-        if (link === endTitle) {
-          args.setSearchLog(prev => [...prev, `>> TARGET ACQUIRED: ${link} <<`]);
-          parentMap.set(link, title);
-          const path: string[] = [endTitle];
-          let curr = endTitle;
-          while (curr !== startTitle) {
-            const p = parentMap.get(curr)!;
-            path.unshift(p);
-            curr = p;
-          }
-
-          const newNodes: Node[] = path.map(p => ({ id: p, title: p }));
-          const newLinks: Link[] = [];
-          for (let i = 0; i < path.length - 1; i++) {
-            const source = path[i];
-            const target = path[i + 1];
-            const sourceLinks = WikiService.getLinksFromCache(source);
-            const context = sourceLinks?.find(l => l.title === target)?.context;
-            newLinks.push({
-              source,
-              target,
-              id: `${source}-${target}`,
-              type: 'path',
-              context,
-            });
-          }
-
-          if (args.graphManagerRef.current) {
-            args.graphManagerRef.current.addNodes(newNodes);
-            args.graphManagerRef.current.addLinks(newLinks);
-            args.setPathNodes(new Set(path));
-
-            const updates = path.map(p => ({ nodeId: p, metadata: { isInPath: true } }));
-            args.graphManagerRef.current.setNodesMetadata(updates);
-            args.graphManagerRef.current.highlightNode(null);
-          }
-
-          const triggerLinkId = `${title}-${endTitle}`;
-          const pathId = path.join(' -> ');
-          if (!foundPathIds.has(pathId)) {
-            foundPathIds.add(pathId);
-            args.setSearchLog(prev => [...prev, `[FOUND] Path #${foundPathIds.size} (len ${path.length})`].slice(-8));
-            args.onFoundPath?.({ triggerLinkId, path });
-          }
-
-          if (!args.keepSearching) {
-            args.setPathSelectedNodes([]);
-            args.setSearchProgress(prev => ({ ...prev, isSearching: false, isPaused: false }));
-            args.setLoading(false);
-            return;
-          }
-
-          // Continue exploring for additional connections.
-          // Keep the BFS tree as-is to avoid exponential blowup.
+        const knownDepth = depthByNode.get(link);
+        if (knownDepth === undefined) {
+          depthByNode.set(link, nextDepth);
+          parentsByNode.set(link, new Set([title]));
+          queue.push({ title: link, depth: nextDepth });
+        } else if (knownDepth === nextDepth) {
+          const set = parentsByNode.get(link) || new Set<string>();
+          set.add(title);
+          parentsByNode.set(link, set);
+        } else {
           continue;
         }
 
-        visited.add(link);
-        parentMap.set(link, title);
-        queue.push({ title: link, depth: depth + 1 });
+        if (link === endTitle) {
+          if (foundDepth === null) {
+            foundDepth = nextDepth;
+            args.setSearchLog(prev => [...prev, `>> TARGET ACQUIRED @ depth ${foundDepth} <<`].slice(-8));
+          }
+        }
       }
     }
 
-    if (!args.searchAbortRef.current) {
-      args.setError('No path found within search limits.');
-      args.setSearchLog(prev => [...prev, `[FAILURE] Target not found in search horizon.`]);
+    if (foundDepth === null) {
+      if (!args.searchAbortRef.current) {
+        args.setError('No path found within search limits.');
+        args.setSearchLog(prev => [...prev, `[FAILURE] Target not found in search horizon.`].slice(-8));
+      }
+      return;
     }
+
+    const keepSearching = args.keepSearchingRef.current;
+    const paths = keepSearching ? buildPaths(5) : buildPaths(1);
+
+    if (paths.length === 0) {
+      args.setError('Path found but could not be reconstructed.');
+      args.setSearchLog(prev => [...prev, `[ERROR] Failed to reconstruct path.`].slice(-8));
+      return;
+    }
+
+    paths.forEach((path, index) => {
+      const newNodes: Node[] = path.map(p => ({ id: p, title: p }));
+      const newLinks: Link[] = [];
+      for (let i = 0; i < path.length - 1; i++) {
+        const source = path[i];
+        const target = path[i + 1];
+        const sourceLinks = WikiService.getLinksFromCache(source);
+        const context = sourceLinks?.find(l => l.title === target)?.context;
+        newLinks.push({
+          source,
+          target,
+          id: `${source}-${target}`,
+          type: 'path',
+          context,
+        });
+      }
+
+      if (args.graphManagerRef.current) {
+        args.graphManagerRef.current.addNodes(newNodes);
+        args.graphManagerRef.current.addLinks(newLinks);
+        if (index === 0) args.setPathNodes(new Set(path));
+
+        const updates = path.map(p => ({ nodeId: p, metadata: { isInPath: true } }));
+        args.graphManagerRef.current.setNodesMetadata(updates);
+        args.graphManagerRef.current.highlightNode(null);
+      }
+
+      const triggerLinkId = `${path[path.length - 2]}-${endTitle}`;
+      args.onFoundPath?.({ triggerLinkId, path });
+    });
+
+    args.setSearchLog(prev => [...prev, `[DONE] Found ${paths.length} path(s).`].slice(-8));
   } catch (err: any) {
     args.setError(err.message || 'Error during pathfinding');
-    args.setSearchLog(prev => [...prev, `[ERROR] ${err.message}`]);
+    args.setSearchLog(prev => [...prev, `[ERROR] ${err.message}`].slice(-8));
   } finally {
     args.setLoading(false);
     args.setSearchProgress(prev => ({ ...prev, isSearching: false, isPaused: false }));

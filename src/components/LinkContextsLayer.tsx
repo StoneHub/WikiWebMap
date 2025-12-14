@@ -11,9 +11,11 @@ function rectsOverlap(
   return !(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom);
 }
 
-function computeNonOverlappingPopupPositions(items: Array<{ id: string; position: Position }>) {
-  const POPUP_WIDTH = 256;
-  const POPUP_HEIGHT = 140;
+function computeNonOverlappingPopupPositions(
+  items: Array<{ id: string; position: Position }>,
+  popupWidth: number,
+  popupHeight: number
+) {
   const POPUP_PADDING = 12;
   const ANCHOR_Y_OFFSET = 15; // matches LinkContextPopup translateY(-15px)
 
@@ -25,10 +27,10 @@ function computeNonOverlappingPopupPositions(items: Array<{ id: string; position
   const result: Record<string, Position> = {};
 
   const calcRect = (p: Position) => {
-    const left = p.x - POPUP_WIDTH / 2;
+    const left = p.x - popupWidth / 2;
     const bottom = p.y - ANCHOR_Y_OFFSET;
-    const top = bottom - POPUP_HEIGHT;
-    const right = left + POPUP_WIDTH;
+    const top = bottom - popupHeight;
+    const right = left + popupWidth;
     return { left, top, right, bottom };
   };
 
@@ -42,9 +44,9 @@ function computeNonOverlappingPopupPositions(items: Array<{ id: string; position
       const collision = placed.some(p => rectsOverlap(p.rect, rect));
       if (!collision) break;
 
-      const nextY = position.y - (POPUP_HEIGHT + POPUP_PADDING);
-      if (nextY - POPUP_HEIGHT - ANCHOR_Y_OFFSET < 10) {
-        position = { x: position.x + POPUP_WIDTH + POPUP_PADDING, y: item.position.y };
+      const nextY = position.y - (popupHeight + POPUP_PADDING);
+      if (nextY - popupHeight - ANCHOR_Y_OFFSET < 10) {
+        position = { x: position.x + popupWidth + POPUP_PADDING, y: item.position.y };
       } else {
         position = { x: position.x, y: nextY };
       }
@@ -63,6 +65,7 @@ export function LinkContextsLayer(props: {
   activeLinkIds: string[];
   positions: Record<string, Position>;
   getLinkById: (linkId: string) => Link | undefined;
+  scale: number;
   onCloseLinkId: (linkId: string) => void;
 }) {
   const items = useMemo(() => {
@@ -71,7 +74,14 @@ export function LinkContextsLayer(props: {
       .filter((x): x is { id: string; position: Position } => Boolean(x.position));
   }, [props.activeLinkIds, props.positions]);
 
-  const adjusted = useMemo(() => computeNonOverlappingPopupPositions(items), [items]);
+  const clampedScale = Math.min(1.15, Math.max(0.75, props.scale));
+  const popupWidth = Math.round(256 * clampedScale);
+  const popupHeight = Math.round(140 * clampedScale);
+
+  const adjusted = useMemo(
+    () => computeNonOverlappingPopupPositions(items, popupWidth, popupHeight),
+    [items, popupWidth, popupHeight]
+  );
 
   return (
     <>
@@ -85,6 +95,7 @@ export function LinkContextsLayer(props: {
             key={linkId}
             link={link}
             position={position}
+            scale={props.scale}
             onClose={() => props.onCloseLinkId(linkId)}
           />
         );

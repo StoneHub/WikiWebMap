@@ -7,6 +7,7 @@ interface NodeDetailsPanelProps {
     nodeThumbnails: Record<string, string>;
     onClose: () => void;
     onExpand: (id: string) => void;
+    onPruneLeaves: () => void;
     onDelete: (id: string) => void;
 }
 
@@ -16,6 +17,7 @@ export const NodeDetailsPanel: React.FC<NodeDetailsPanelProps> = ({
     nodeThumbnails,
     onClose,
     onExpand,
+    onPruneLeaves,
     onDelete,
 }) => {
     if (!clickedNode) return null;
@@ -81,6 +83,13 @@ export const NodeDetailsPanel: React.FC<NodeDetailsPanelProps> = ({
                             className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-xl text-xs font-medium transition shadow-lg shadow-indigo-500/20 text-white"
                         >
                             Expand
+                        </button>
+                        <button
+                            onClick={onPruneLeaves}
+                            className="col-span-2 px-4 py-2 bg-gray-700/60 hover:bg-gray-600/60 rounded-xl text-xs font-medium transition text-gray-100 border border-gray-600/40"
+                            title="Remove all nodes with fewer than 2 connections"
+                        >
+                            Prune Leaves (degree &lt; 2)
                         </button>
                     </div>
                     <button

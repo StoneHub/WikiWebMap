@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { GraphManager, Node as GraphNode, Link } from './GraphManager';
+import { GraphManager, Node as GraphNode, Link, GraphStateSnapshot } from './GraphManager';
 import { UpdateQueue } from './UpdateQueue';
 import { WikiService, LinkWithContext } from './WikiService';
 import './index.css';
@@ -68,14 +68,121 @@ const WikiWebExplorer = () => {
   const updateQueueRef = useRef<UpdateQueue | null>(null);
   const searchAbortRef = useRef(false);
   const searchPauseRef = useRef(false);
+  const keepSearchingRef = useRef(false);
   const animationFrameRef = useRef<number>();
   const activeLinkContextsRef = useRef<Set<string>>(new Set());
   const linkContextPositionsRef = useRef<Record<string, { x: number; y: number }>>({});
   const searchDockLinkIdRef = useRef<string | null>(null);
+  const mutationEpochRef = useRef(0);
+
+  type AppSnapshot = {
+    graph: GraphStateSnapshot;
+    userTypedNodes: string[];
+    autoDiscoveredNodes: string[];
+    expandedNodes: string[];
+    pathNodes: string[];
+    nodeThumbnails: Record<string, string>;
+  };
+
+  const undoStackRef = useRef<AppSnapshot[]>([]);
+  const redoStackRef = useRef<AppSnapshot[]>([]);
+  const MAX_HISTORY = 30;
+
+  const createSnapshot = (): AppSnapshot | null => {
+    if (!graphManagerRef.current) return null;
+    return {
+      graph: graphManagerRef.current.getStateSnapshot(),
+      userTypedNodes: Array.from(userTypedNodes),
+      autoDiscoveredNodes: Array.from(autoDiscoveredNodes),
+      expandedNodes: Array.from(expandedNodes),
+      pathNodes: Array.from(pathNodes),
+      nodeThumbnails: { ...nodeThumbnails },
+    };
+  };
+
+  const restoreSnapshot = (snap: AppSnapshot) => {
+    if (!graphManagerRef.current) return;
+
+    // Invalidate in-flight async mutations (add/expand/etc).
+    mutationEpochRef.current++;
+    updateQueueRef.current?.clear();
+
+    // Stop search UX.
+    searchAbortRef.current = true;
+    searchPauseRef.current = false;
+    setSearchProgress(prev => ({ ...prev, isSearching: false, isPaused: false }));
+    setSearchDockLinkId(null);
+    setSearchDockPosition(null);
+    setFoundPaths([]);
+    setSearchLog([]);
+
+    setActiveLinkContexts(new Set());
+
+    graphManagerRef.current.setStateSnapshot(snap.graph);
+
+    setUserTypedNodes(new Set(snap.userTypedNodes));
+    setAutoDiscoveredNodes(new Set(snap.autoDiscoveredNodes));
+    setExpandedNodes(new Set(snap.expandedNodes));
+    setPathNodes(new Set(snap.pathNodes));
+    setNodeThumbnails(snap.nodeThumbnails);
+
+    setBulkSelectedNodes([]);
+    setPathSelectedNodes([]);
+    setClickedNode(null);
+    setClickedSummary('');
+    setError('');
+  };
+
+  const pushHistory = () => {
+    const snap = createSnapshot();
+    if (!snap) return;
+    undoStackRef.current.push(snap);
+    if (undoStackRef.current.length > MAX_HISTORY) undoStackRef.current.shift();
+    redoStackRef.current = [];
+  };
+
+  const undo = () => {
+    const prev = undoStackRef.current.pop();
+    if (!prev) return;
+    const current = createSnapshot();
+    if (current) redoStackRef.current.push(current);
+    restoreSnapshot(prev);
+  };
+
+  const redo = () => {
+    const next = redoStackRef.current.pop();
+    if (!next) return;
+    const current = createSnapshot();
+    if (current) undoStackRef.current.push(current);
+    restoreSnapshot(next);
+  };
 
   // Visual settings
   const [nodeSpacing, setNodeSpacing] = useState(150);
   const [searchDepth, setSearchDepth] = useState(2);
+  const [nodeSizeScale, setNodeSizeScale] = useState(1);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      const isTyping = tag === 'input' || tag === 'textarea' || (target as any)?.isContentEditable;
+      if (isTyping) return;
+
+      const isMac = navigator.platform.toLowerCase().includes('mac');
+      const mod = isMac ? e.metaKey : e.ctrlKey;
+      if (!mod) return;
+
+      if (e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   useEffect(() => {
     activeLinkContextsRef.current = activeLinkContexts;
@@ -172,6 +279,12 @@ const WikiWebExplorer = () => {
   }, [nodeSpacing]);
 
   useEffect(() => {
+    if (graphManagerRef.current) {
+      graphManagerRef.current.setNodeSizeScale(nodeSizeScale);
+    }
+  }, [nodeSizeScale]);
+
+  useEffect(() => {
     const trimmed = apiContactEmail.trim();
     if (trimmed) localStorage.setItem('wikiApiContactEmail', trimmed);
     else localStorage.removeItem('wikiApiContactEmail');
@@ -242,10 +355,16 @@ const WikiWebExplorer = () => {
     if (!silent) setLoading(true);
     setError('');
 
+    const epoch = mutationEpochRef.current;
+
     try {
       const resolvedTitle = await WikiService.resolveTitle(title);
       const links = await WikiService.fetchLinks(resolvedTitle);
       const summaryData = await WikiService.fetchSummary(resolvedTitle);
+
+      if (epoch !== mutationEpochRef.current) return resolvedTitle;
+      pushHistory();
+
       if (summaryData.thumbnail) {
         setNodeThumbnails(prev => ({ ...prev, [resolvedTitle]: summaryData.thumbnail! }));
       }
@@ -286,6 +405,7 @@ const WikiWebExplorer = () => {
         }
       });
 
+      if (epoch !== mutationEpochRef.current) return resolvedTitle;
       updateQueueRef.current.queueUpdate(newNodes, newLinks);
       if (!silent) setSearchTerm('');
 
@@ -300,6 +420,7 @@ const WikiWebExplorer = () => {
   };
 
   const deleteNodeImperative = (nodeId: string) => {
+    pushHistory();
     if (graphManagerRef.current) {
       graphManagerRef.current.deleteNode(nodeId);
     }
@@ -315,15 +436,64 @@ const WikiWebExplorer = () => {
   };
 
   const pruneGraph = () => {
-    if (graphManagerRef.current) {
-      const deletedCount = graphManagerRef.current.pruneNodes();
-      if (deletedCount > 0) {
-        setError(`Pruned ${deletedCount} isolated nodes`);
-        setTimeout(() => setError(''), 3000);
-      } else {
-        setError('No isolated nodes found to prune');
-        setTimeout(() => setError(''), 3000);
-      }
+    const ids = bulkSelectedNodes.map(n => n.id);
+    if (ids.length === 0) {
+      setError('No bulk selection to delete (Alt+Drag).');
+      setTimeout(() => setError(''), 2500);
+      return;
+    }
+
+    if (!graphManagerRef.current) return;
+
+    pushHistory();
+
+    ids.forEach(id => graphManagerRef.current!.deleteNode(id));
+
+    const deletedIds = new Set(ids);
+    setBulkSelectedNodes([]);
+    setPathSelectedNodes(prev => prev.filter(n => !deletedIds.has(n.id)));
+    setPathNodes(prev => {
+      const s = new Set(prev);
+      ids.forEach(id => s.delete(id));
+      return s;
+    });
+    setUserTypedNodes(prev => {
+      const s = new Set(prev);
+      ids.forEach(id => s.delete(id));
+      return s;
+    });
+    setAutoDiscoveredNodes(prev => {
+      const s = new Set(prev);
+      ids.forEach(id => s.delete(id));
+      return s;
+    });
+    setExpandedNodes(prev => {
+      const s = new Set(prev);
+      ids.forEach(id => s.delete(id));
+      return s;
+    });
+
+    if (clickedNode && deletedIds.has(clickedNode.id)) setClickedNode(null);
+
+    // Close any open contexts; their backing links may have been removed.
+    setActiveLinkContexts(new Set());
+    setSearchDockLinkId(null);
+    setSearchDockPosition(null);
+
+    setError(`Deleted ${ids.length} selected nodes.`);
+    setTimeout(() => setError(''), 2500);
+  };
+
+  const pruneLeafNodes = () => {
+    if (!graphManagerRef.current) return;
+    pushHistory();
+    const deletedCount = graphManagerRef.current.pruneNodes();
+    if (deletedCount > 0) {
+      setError(`Pruned ${deletedCount} leaf nodes (degree < 2).`);
+      setTimeout(() => setError(''), 2500);
+    } else {
+      setError('No leaf nodes found to prune.');
+      setTimeout(() => setError(''), 2500);
     }
   };
 
@@ -355,6 +525,7 @@ const WikiWebExplorer = () => {
 
   useEffect(() => {
     setSearchProgress(prev => ({ ...prev, keepSearching }));
+    keepSearchingRef.current = keepSearching;
   }, [keepSearching]);
 
   const findPath = (startInput: string, endInput: string) =>
@@ -362,7 +533,7 @@ const WikiWebExplorer = () => {
       startInput,
       endInput,
       maxDepth: searchDepth,
-      keepSearching,
+      keepSearchingRef,
       graphManagerRef,
       searchAbortRef,
       searchPauseRef,
@@ -396,8 +567,15 @@ const WikiWebExplorer = () => {
       return;
     }
     setLoading(true);
+
+    const epoch = mutationEpochRef.current;
+
     try {
       const linksWithContext = await WikiService.fetchLinks(title);
+
+      if (epoch !== mutationEpochRef.current) return;
+      pushHistory();
+
       const existingNodes = WikiService.getCachedNodes();
       const scores: Record<string, number> = {};
 
@@ -444,6 +622,7 @@ const WikiWebExplorer = () => {
 
       if (nodesToAdd.length === 0) setError('No relevant connections found.');
       else {
+        if (epoch !== mutationEpochRef.current) return;
         if (updateQueueRef.current) updateQueueRef.current.queueUpdate(nodesToAdd, linksToAdd);
         if (newAutoDiscovered.size > 0) setAutoDiscoveredNodes(prev => new Set([...prev, ...newAutoDiscovered]));
         setExpandedNodes(prev => new Set([...prev, title]));
@@ -562,6 +741,8 @@ const WikiWebExplorer = () => {
         setNodeSpacing={setNodeSpacing}
         searchDepth={searchDepth}
         setSearchDepth={setSearchDepth}
+        nodeSizeScale={nodeSizeScale}
+        setNodeSizeScale={setNodeSizeScale}
         apiContactEmail={apiContactEmail}
         setApiContactEmail={setApiContactEmail}
         onPrune={pruneGraph}
@@ -591,6 +772,7 @@ const WikiWebExplorer = () => {
         nodeThumbnails={nodeThumbnails}
         onClose={() => setClickedNode(null)}
         onExpand={expandNode}
+        onPruneLeaves={pruneLeafNodes}
         onDelete={deleteNodeImperative}
       />
 
@@ -599,6 +781,7 @@ const WikiWebExplorer = () => {
         activeLinkIds={Array.from(activeLinkContexts)}
         positions={linkContextPositions}
         getLinkById={(linkId) => graphManagerRef.current?.getLinkById(linkId)}
+        scale={nodeSizeScale}
         onCloseLinkId={(linkId) =>
           setActiveLinkContexts(prev => {
             const n = new Set(prev);

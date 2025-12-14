@@ -7,26 +7,34 @@ interface LinkContextPopupProps {
     link: Link;
     position: { x: number; y: number };
     onClose: () => void;
+    scale?: number;
 }
 
 export const LinkContextPopup: React.FC<LinkContextPopupProps> = ({
     link,
     position,
     onClose,
+    scale = 1,
 }) => {
+    const clampedScale = Math.min(1.15, Math.max(0.75, scale));
+    const width = Math.round(256 * clampedScale);
     return (
         <div
             style={{
                 left: position.x,
                 top: position.y,
                 transform: 'translate(-50%, -100%) translateY(-15px)', // Center horizontally, place above link
+                width,
             }}
-            className="absolute z-40 w-64 animate-pop-in pointer-events-none"
+            className="absolute z-40 animate-pop-in pointer-events-none"
         >
             {/* The Pointer */}
             <div className="absolute bottom-[-10px] left-1/2 transform -translate-x-1/2 w-4 h-4 bg-gray-900 rotate-45 border-r border-b border-green-500/50"></div>
 
-            <div className="bg-gray-900/95 backdrop-blur-md border border-green-500/50 rounded-xl p-3 shadow-2xl relative pointer-events-auto">
+            <div
+                className="bg-gray-900/95 backdrop-blur-md border border-green-500/50 rounded-xl shadow-2xl relative pointer-events-auto"
+                style={{ padding: Math.round(12 * clampedScale) }}
+            >
                 <button
                     onClick={onClose}
                     className="absolute top-1 right-1 p-1 bg-gray-800/50 rounded-full text-gray-400 hover:text-white"
@@ -42,7 +50,7 @@ export const LinkContextPopup: React.FC<LinkContextPopupProps> = ({
                     </svg>
                 </button>
 
-                <div className="mb-2">
+                <div style={{ marginBottom: Math.round(8 * clampedScale) }}>
                     <span className="text-[10px] uppercase font-bold text-green-400 tracking-wider">
                         Connection
                     </span>
@@ -52,7 +60,7 @@ export const LinkContextPopup: React.FC<LinkContextPopupProps> = ({
                     </div>
                 </div>
 
-                <div className="bg-black/40 rounded p-2 border border-green-900/30">
+                <div className="bg-black/40 rounded border border-green-900/30" style={{ padding: Math.round(8 * clampedScale) }}>
                     <p className="text-[10px] text-gray-300 italic leading-relaxed line-clamp-3">
                         "{link.context || 'Context text unavailable.'}"
                     </p>

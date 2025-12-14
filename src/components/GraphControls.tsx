@@ -7,6 +7,8 @@ interface GraphControlsProps {
     setNodeSpacing: (spacing: number) => void;
     searchDepth: number;
     setSearchDepth: (depth: number) => void;
+    nodeSizeScale: number;
+    setNodeSizeScale: (scale: number) => void;
     apiContactEmail: string;
     setApiContactEmail: (email: string) => void;
     onPrune: () => void;
@@ -20,6 +22,8 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
     setNodeSpacing,
     searchDepth,
     setSearchDepth,
+    nodeSizeScale,
+    setNodeSizeScale,
     apiContactEmail,
     setApiContactEmail,
     onPrune,
@@ -79,6 +83,21 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                         </div>
                         <div>
                             <div className="flex justify-between text-xs text-gray-400 mb-1">
+                                <span>Node Size</span>
+                                <span>{Math.round(nodeSizeScale * 100)}%</span>
+                            </div>
+                            <input
+                                type="range"
+                                min="0.6"
+                                max="1.6"
+                                step="0.05"
+                                value={nodeSizeScale}
+                                onChange={(e) => setNodeSizeScale(Number(e.target.value))}
+                                className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                            />
+                        </div>
+                        <div>
+                            <div className="flex justify-between text-xs text-gray-400 mb-1">
                                 <span>API Contact Email</span>
                             </div>
                             <input
@@ -106,10 +125,10 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
             <button
                 onClick={onPrune}
                 className="h-12 px-6 bg-gray-800/80 hover:bg-red-900/80 backdrop-blur-md border border-gray-600/50 hover:border-red-500/50 rounded-full shadow-xl flex items-center gap-2 text-gray-200 hover:text-white transition-all hover:scale-105"
-                title="Clean up isolated nodes"
+                title="Delete Alt+Drag selected nodes"
             >
                 <span className="text-lg">✂️</span>
-                <span className="font-semibold text-sm">Prune</span>
+                <span className="font-semibold text-sm">Delete</span>
             </button>
         </div>
     );
