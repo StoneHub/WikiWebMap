@@ -22,6 +22,7 @@ export interface Link {
 export type GraphStateSnapshot = {
   nodes: Node[];
   links: Array<Omit<Link, 'source' | 'target'> & { source: string; target: string }>;
+  nodeMetadata: Record<string, NodeMetadata>;
 };
 
 export interface GraphCallbacks {
@@ -46,6 +47,8 @@ export interface NodeMetadata {
   isBulkSelected: boolean;
   isDimmed: boolean;
   thumbnail?: string;
+  colorSeed?: string;
+  colorRole?: 'root' | 'child';
 }
 
 /**
@@ -178,6 +181,8 @@ export class GraphManager {
             isSelected: false,
             isPathEndpoint: false,
             isBulkSelected: false,
+            colorSeed: undefined,
+            colorRole: undefined,
             isDimmed: false // Default to false
           });
         }
@@ -309,6 +314,8 @@ export class GraphManager {
       isSelected: false,
       isPathEndpoint: false,
       isBulkSelected: false,
+      colorSeed: undefined,
+      colorRole: undefined,
       isDimmed: false
     };
 
@@ -411,6 +418,8 @@ export class GraphManager {
         isSelected: false,
         isPathEndpoint: false,
         isBulkSelected: false,
+        colorSeed: undefined,
+        colorRole: undefined,
         isDimmed: false
       };
 
@@ -500,11 +509,16 @@ export class GraphManager {
         target,
       };
     });
-    return { nodes, links };
+    const nodeMetadata: Record<string, NodeMetadata> = {};
+    this.nodeMetadata.forEach((meta, id) => {
+      nodeMetadata[id] = { ...meta };
+    });
+    return { nodes, links, nodeMetadata };
   }
 
   setStateSnapshot(snapshot: GraphStateSnapshot) {
     this.clear();
+    this.nodeMetadata = new Map(Object.entries(snapshot.nodeMetadata || {}).map(([k, v]) => [k, { ...v }]));
     this.addNodes(snapshot.nodes.map(n => ({ ...n })));
     this.addLinks(
       snapshot.links.map(l => ({
@@ -733,9 +747,35 @@ export class GraphManager {
     if (meta.isPathEndpoint) return '#00ffff'; // Cyan for path endpoints
     if (meta.isBulkSelected) return '#ff8800'; // Orange for bulk-selected
     if (meta.isRecentlyAdded) return '#ff00ff'; // Magenta for newly added
-    if (meta.isUserTyped) return '#0088ff'; // Blue for user-typed
-    if (meta.isAutoDiscovered) return '#9966ff'; // Purple for auto-discovered
-    return '#0088ff'; // Default blue
+    if (meta.colorSeed) {
+      const seedHue = this.hashToHue(meta.colorSeed);
+      const nodeHueOffset = this.hashToSignedOffset(_nodeId, 10);
+      const hue = (seedHue + nodeHueOffset + 360) % 360;
+      const isRoot = meta.colorRole === 'root';
+      const sat = isRoot ? 82 : 52;
+      const light = isRoot ? 55 : 42;
+      return `hsl(${hue} ${sat}% ${light}%)`;
+    }
+    if (meta.isUserTyped) return '#0088ff'; // Blue for user-typed (fallback)
+    if (meta.isAutoDiscovered) return '#9966ff'; // Purple for auto-discovered (fallback)
+    return '#0088ff'; // Default blue (fallback)
+  }
+
+  private hashToHue(input: string): number {
+    let hash = 0;
+    for (let i = 0; i < input.length; i++) {
+      hash = (hash * 31 + input.charCodeAt(i)) | 0;
+    }
+    return Math.abs(hash) % 360;
+  }
+
+  private hashToSignedOffset(input: string, maxAbs: number): number {
+    let hash = 0;
+    for (let i = 0; i < input.length; i++) {
+      hash = (hash * 33 + input.charCodeAt(i)) | 0;
+    }
+    const range = maxAbs * 2 + 1;
+    return (Math.abs(hash) % range) - maxAbs;
   }
 
   private getNodeStroke(meta: Partial<NodeMetadata>): string {
@@ -886,6 +926,29 @@ export class GraphManager {
 
   getLinkById(linkId: string): Link | undefined {
     return this.links.find(l => l.id === linkId);
+  }
+
+  getLensingNodes(): Array<{ x: number; y: number; mass: number }> {
+    const transform = d3.zoomTransform(this.svg.node()!);
+
+    const degreeById = new Map<string, number>();
+    for (const l of this.links) {
+      const s = typeof l.source === 'object' ? l.source.id : l.source;
+      const t = typeof l.target === 'object' ? l.target.id : l.target;
+      degreeById.set(s, (degreeById.get(s) || 0) + 1);
+      degreeById.set(t, (degreeById.get(t) || 0) + 1);
+    }
+
+    const result: Array<{ x: number; y: number; mass: number }> = [];
+    for (const n of this.nodes) {
+      if (n.x === undefined || n.y === undefined) continue;
+      const screenX = transform.applyX(n.x);
+      const screenY = transform.applyY(n.y);
+      const degree = degreeById.get(n.id) || 0;
+      const mass = (0.8 + Math.min(10, degree) * 0.25) * this.nodeSizeScale;
+      result.push({ x: screenX, y: screenY, mass });
+    }
+    return result;
   }
 
   /**

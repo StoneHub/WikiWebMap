@@ -411,6 +411,15 @@ const WikiWebExplorer = () => {
 
       setAutoDiscoveredNodes(prev => new Set([...prev, ...newAutoDiscovered]));
 
+      // Color grouping: root + its direct children
+      graphManagerRef.current?.setNodesMetadata([
+        { nodeId: resolvedTitle, metadata: { colorSeed: resolvedTitle, colorRole: 'root' } },
+        ...Array.from(newAutoDiscovered).map(id => ({
+          nodeId: id,
+          metadata: { colorSeed: resolvedTitle, colorRole: 'child' as const },
+        })),
+      ]);
+
       // Auto-connect existing
       const cachedNodes = WikiService.getCachedNodes();
       cachedNodes.forEach(existingNodeId => {
@@ -669,6 +678,15 @@ const WikiWebExplorer = () => {
 
       if (nodesToAdd.length === 0) setError('No relevant connections found.');
       else {
+        // Color grouping: expanded node + its direct children
+        graphManagerRef.current?.setNodesMetadata([
+          { nodeId: title, metadata: { colorSeed: title, colorRole: 'root' } },
+          ...Array.from(newAutoDiscovered).map(id => ({
+            nodeId: id,
+            metadata: { colorSeed: title, colorRole: 'child' as const },
+          })),
+        ]);
+
         if (epoch !== mutationEpochRef.current) return;
         if (updateQueueRef.current) updateQueueRef.current.queueUpdate(nodesToAdd, linksToAdd);
         if (newAutoDiscovered.size > 0) setAutoDiscoveredNodes(prev => new Set([...prev, ...newAutoDiscovered]));
