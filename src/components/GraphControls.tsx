@@ -7,6 +7,8 @@ interface GraphControlsProps {
     setNodeSpacing: (spacing: number) => void;
     searchDepth: number;
     setSearchDepth: (depth: number) => void;
+    apiContactEmail: string;
+    setApiContactEmail: (email: string) => void;
     onPrune: () => void;
     onRunAutoTest: () => void;
 }
@@ -18,6 +20,8 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
     setNodeSpacing,
     searchDepth,
     setSearchDepth,
+    apiContactEmail,
+    setApiContactEmail,
     onPrune,
     onRunAutoTest,
 }) => {
@@ -73,12 +77,27 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                                 className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
                             />
                         </div>
+                        <div>
+                            <div className="flex justify-between text-xs text-gray-400 mb-1">
+                                <span>API Contact Email</span>
+                            </div>
+                            <input
+                                type="email"
+                                value={apiContactEmail}
+                                onChange={(e) => setApiContactEmail(e.target.value)}
+                                placeholder="you@example.com"
+                                className="w-full bg-black/30 border border-gray-700/70 rounded px-2 py-1 text-xs text-gray-200 placeholder:text-gray-500 focus:outline-none focus:border-green-500/60"
+                            />
+                            <div className="mt-1 text-[10px] text-gray-500">
+                                Used for Wikipedia API identification.
+                            </div>
+                        </div>
                         {/* Auto Test Button */}
                         <button
                             onClick={onRunAutoTest}
                             className="w-full py-2 bg-purple-900/30 border border-purple-500/50 text-purple-300 text-xs rounded hover:bg-purple-900/50 transition"
                         >
-                            🛠️ Run Auto-Test (Facebook)
+                            🛠️ Run Auto-Test (Physics → Science)
                         </button>
                     </div>
                 </div>

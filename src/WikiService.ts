@@ -23,11 +23,22 @@ export interface SummaryData {
 export class WikiService {
     private static cache: Map<string, CacheItem> = new Map();
     private static summaryCache: Map<string, SummaryData> = new Map();
+    private static apiUserAgentHeader: string | undefined;
+
+    static setApiUserAgent(value: string | undefined) {
+        const next = value?.trim();
+        this.apiUserAgentHeader = next ? next : undefined;
+    }
+
+    private static getRequestHeaders(): HeadersInit | undefined {
+        return this.apiUserAgentHeader ? { 'Api-User-Agent': this.apiUserAgentHeader } : undefined;
+    }
 
     static async resolveTitle(query: string): Promise<string> {
         try {
             const response = await fetch(
-                `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(query)}&redirects=1&format=json&origin=*`
+                `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(query)}&redirects=1&format=json&origin=*`,
+                { headers: this.getRequestHeaders() }
             );
             const data = await response.json();
             const pages = data.query.pages;
@@ -59,6 +70,8 @@ export class WikiService {
                 `https://en.wikipedia.org/w/api.php?action=parse&page=${encodeURIComponent(
                     title
                 )}&prop=text&section=0&format=json&origin=*&redirects=1`
+                ,
+                { headers: this.getRequestHeaders() }
             );
 
             if (!response.ok) throw new Error('Failed to fetch from Wikipedia');
@@ -156,6 +169,8 @@ export class WikiService {
                 `https://en.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(
                     term
                 )}&limit=5&namespace=0&format=json&origin=*`
+                ,
+                { headers: this.getRequestHeaders() }
             );
             const data = await response.json();
             return data[1];
@@ -173,7 +188,8 @@ export class WikiService {
 
         try {
             const response = await fetch(
-                `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`
+                `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`,
+                { headers: this.getRequestHeaders() }
             );
             if (!response.ok) throw new Error('Failed to fetch summary');
             const data = await response.json();

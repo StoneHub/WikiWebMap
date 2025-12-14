@@ -50,7 +50,6 @@ export class GraphManager {
   private g!: d3.Selection<SVGGElement, unknown, null, undefined>;
   private linksGroup!: d3.Selection<SVGGElement, unknown, null, undefined>;
   private nodesGroup!: d3.Selection<SVGGElement, unknown, null, undefined>;
-  private nodesGroup!: d3.Selection<SVGGElement, unknown, null, undefined>;
   private defs!: d3.Selection<SVGDefsElement, unknown, null, undefined>;
   private brushGroup!: d3.Selection<SVGGElement, unknown, null, undefined>;
 
@@ -830,6 +829,10 @@ export class GraphManager {
       const t = typeof l.target === 'object' ? l.target.id : l.target;
       return (s === sourceId && t === targetId) || (s === targetId && t === sourceId);
     });
+  }
+
+  getLinkById(linkId: string): Link | undefined {
+    return this.links.find(l => l.id === linkId);
   }
 
   /**
