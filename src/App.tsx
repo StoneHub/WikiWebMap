@@ -229,11 +229,6 @@ const WikiWebExplorer = () => {
       onNodeDoubleClick: (node, event) => handleNodeDoubleClick(event as any, node),
       onLinkClick: (link, event) => handleLinkClick(event as any, link),
       onSelectionChange: (nodes) => setBulkSelectedNodes(nodes),
-      onNodeDragEnd: (node, isOverTrash) => {
-        if (isOverTrash) {
-          deleteNodeImperative(node.id);
-        }
-      },
       onStatsUpdate: (stats) => {
         setNodeCount(stats.nodeCount);
         setLinkCount(stats.linkCount);

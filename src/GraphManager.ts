@@ -29,7 +29,6 @@ export interface GraphCallbacks {
   onNodeClick?: (node: Node, event: MouseEvent) => void;
   onNodeDoubleClick?: (node: Node, event: MouseEvent) => void;
   onNodeDragStart?: (node: Node) => void;
-  onNodeDragEnd?: (node: Node, isOverTrash: boolean) => void;
   onLinkClick?: (link: Link, event: MouseEvent) => void;
   onStatsUpdate?: (stats: { nodeCount: number; linkCount: number }) => void;
   onSelectionChange?: (selectedNodes: Node[]) => void;
@@ -935,15 +934,7 @@ export class GraphManager {
         const distance = Math.sqrt(dx * dx + dy * dy);
 
         if (distance > this.dragThreshold) {
-          // Was a real drag - check if over trash
-          const mouseX = event.sourceEvent.clientX;
-          const mouseY = event.sourceEvent.clientY;
-          const windowHeight = window.innerHeight;
-          const isOverTrash = mouseX < 150 && mouseY > windowHeight - 150;
-
-          if (this.callbacks.onNodeDragEnd) {
-            this.callbacks.onNodeDragEnd(d, isOverTrash);
-          }
+          // Drag end (no-op hook removed)
         }
 
         d.fx = null;
