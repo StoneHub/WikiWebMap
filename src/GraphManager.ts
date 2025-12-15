@@ -704,7 +704,7 @@ export class GraphManager {
         const el = d3.select(event.currentTarget);
         resetLink(el as any, d);
       })
-      .on('pointerdown', (event, d) => {
+      .on('pointerdown', (event) => {
         if (event.pointerType !== 'touch') return;
         const el = event.currentTarget as SVGLineElement;
         longPressStarts.set(el, { x: event.clientX, y: event.clientY });
