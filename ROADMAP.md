@@ -41,6 +41,13 @@ This project is moving toward an imperative D3 `GraphManager` + React UI shell. 
 5. Improve auto-test further (optional "Kevin Bacon" → "Hollywood", reduce timing/polling).
 6. Fix local build tooling (`vite build` currently fails due to Rollup optional dependency install).
 
+### Smarter Connection Discovery (ideas backlog)
+- Use entity extraction on summaries/sections to add unlinked mentions as low-confidence candidate nodes; resolve via `resolveTitle`.
+- Sample backlinks (“What links here”) and rank by link density/context overlap to surface missed related pages.
+- Add co-occurrence/context edges (same paragraph/section) with snippets as justification; make them toggleable and low weight.
+- Leverage categories/templates/infobox types to cluster related nodes and propose expansions.
+- Fold redirects/aliases (lead bold terms) into search/expansion to avoid dead ends.
+
 ### Mobile UX Overhaul Prompt
 - Menus and overlays overwhelm small screens; consolidate controls into a single icon + drawer or bottom sheet on widths under ~768px.
 - Shrink padding/typography for floating panels, and ensure search/results stacks as full-width rows with tap-friendly targets.

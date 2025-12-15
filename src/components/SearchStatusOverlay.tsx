@@ -13,7 +13,53 @@ export function SearchStatusOverlay(props: {
   keepSearching: boolean;
   onToggleKeepSearching: () => void;
   foundCount: number;
+  queue: Array<{ id: string; from: string; to: string; source: string }>;
+  activeSearch: { id: string; from: string; to: string; source: string } | null;
+  onDeleteQueued: (id: string) => void;
+  isMinimized: boolean;
+  onToggleMinimize: () => void;
+  persistentVisible: boolean;
 }) {
+  const renderQueue = () => {
+    if (props.queue.length === 0) return null;
+    return (
+      <div className="mt-2 border border-green-500/30 rounded-lg p-2 bg-black/40">
+        <div className="text-[10px] uppercase tracking-widest text-green-300/80 mb-1">Queued</div>
+        <div className="space-y-1 max-h-20 overflow-y-auto">
+          {props.queue.map(item => (
+            <div key={item.id} className="flex items-center justify-between text-[11px] text-green-200/90 bg-green-900/10 rounded px-2 py-1">
+              <span className="truncate">{item.from} → {item.to}</span>
+              <button
+                onClick={() => props.onDeleteQueued(item.id)}
+                className="text-red-300 hover:text-red-200 text-xs px-1"
+                title="Remove from queue"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  if (props.isMinimized) {
+    return (
+      <div className="fixed bottom-4 left-4 z-30 pointer-events-none">
+        <div className="pointer-events-auto bg-black/80 border border-green-500/40 rounded-full px-3 py-2 text-xs text-green-200 flex items-center gap-2 shadow-lg">
+          <span>{props.activeSearch ? `Searching ${props.activeSearch.from} → ${props.activeSearch.to}` : 'Search terminal'}</span>
+          {props.queue.length > 0 && <span className="bg-green-700/50 px-2 py-0.5 rounded-full text-[11px]">+{props.queue.length}</span>}
+          <button
+            onClick={props.onToggleMinimize}
+            className="ml-2 px-2 py-0.5 bg-green-600/60 hover:bg-green-500/60 rounded-full text-white text-[11px]"
+          >
+            Open
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (props.searchProgress.isSearching) {
     const wrapperClassName = props.isDocked
       ? 'absolute z-30 w-80 pointer-events-none'
@@ -41,6 +87,13 @@ export function SearchStatusOverlay(props: {
             <span>
               D{props.searchProgress.currentDepth}/{props.searchProgress.maxDepth} · {props.searchProgress.exploredCount} nodes
             </span>
+            <button
+              onClick={props.onToggleMinimize}
+              className="ml-2 text-green-300 hover:text-white text-[11px]"
+              title="Minimize terminal"
+            >
+              ⤢
+            </button>
           </div>
           <div className="mb-2 text-[10px] text-green-400/70 flex gap-3">
             <span className="truncate">Page: {props.searchProgress.currentPage || '-'}</span>
@@ -64,6 +117,7 @@ export function SearchStatusOverlay(props: {
               </div>
             ))}
           </div>
+          {renderQueue()}
           <div className="mt-3 flex gap-2">
             {!props.searchProgress.isPaused ? (
               <button
@@ -87,6 +141,25 @@ export function SearchStatusOverlay(props: {
               ABORT
             </button>
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (props.persistentVisible || props.queue.length > 0) {
+    return (
+      <div className="fixed bottom-6 left-6 z-20 pointer-events-none">
+        <div className="bg-black/80 backdrop-blur-md border border-green-500/30 rounded-xl p-3 text-xs text-green-300 shadow-xl pointer-events-auto w-80">
+          <div className="flex items-center justify-between mb-2">
+            <span className="font-semibold">Search Terminal</span>
+            <button
+              onClick={props.onToggleMinimize}
+              className="text-[11px] text-green-200 hover:text-white"
+            >
+              Minimize
+            </button>
+          </div>
+          {renderQueue() || <div className="text-[11px] text-green-300/70">Queue empty.</div>}
         </div>
       </div>
     );

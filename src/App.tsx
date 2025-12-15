@@ -58,6 +58,10 @@ const WikiWebExplorer = () => {
   const [searchDockPosition, setSearchDockPosition] = useState<{ x: number; y: number } | null>(null);
   const [foundPaths, setFoundPaths] = useState<Array<{ triggerLinkId: string; path: string[] }>>([]);
   const [keepSearching, setKeepSearching] = useState(false);
+  const [searchQueue, setSearchQueue] = useState<Array<{ id: string; from: string; to: string; source: 'suggested' | 'shift' }>>([]);
+  const searchQueueRef = useRef<Array<{ id: string; from: string; to: string; source: 'suggested' | 'shift' }>>([]);
+  const [activeSearch, setActiveSearch] = useState<{ id: string; from: string; to: string; source: 'suggested' | 'shift' } | null>(null);
+  const [searchTerminalMinimized, setSearchTerminalMinimized] = useState(false);
 
   // Settings Visibility
   const [showSettings, setShowSettings] = useState(true);
@@ -74,11 +78,16 @@ const WikiWebExplorer = () => {
   const searchAbortRef = useRef(false);
   const searchPauseRef = useRef(false);
   const keepSearchingRef = useRef(false);
+  const isRunningSearchRef = useRef(false);
   const animationFrameRef = useRef<number>();
   const activeLinkContextsRef = useRef<Set<string>>(new Set());
   const linkContextPositionsRef = useRef<Record<string, { x: number; y: number }>>({});
   const searchDockLinkIdRef = useRef<string | null>(null);
   const mutationEpochRef = useRef(0);
+
+  useEffect(() => {
+    searchQueueRef.current = searchQueue;
+  }, [searchQueue]);
 
   type AppSnapshot = {
     graph: GraphStateSnapshot;
@@ -221,6 +230,16 @@ const WikiWebExplorer = () => {
   useEffect(() => {
     searchDockLinkIdRef.current = searchDockLinkId;
   }, [searchDockLinkId]);
+
+  useEffect(() => {
+    // Kick off next queued search when idle
+    if (!isRunningSearchRef.current && searchQueueRef.current.length > 0) {
+      const next = searchQueueRef.current[0];
+      searchQueueRef.current = searchQueueRef.current.slice(1);
+      setSearchQueue(searchQueueRef.current);
+      runQueuedSearch(next);
+    }
+  }, [searchQueue]);
 
   // Initialize GraphManager
   useEffect(() => {
@@ -606,43 +625,85 @@ const WikiWebExplorer = () => {
       },
     });
 
-  const runSuggestedPath = (from: string, to: string) => {
-    pushHistory();
-    mutationEpochRef.current++;
-    updateQueueRef.current?.clear();
-
-    if (graphManagerRef.current) graphManagerRef.current.clear();
-    setUserTypedNodes(new Set());
-    setAutoDiscoveredNodes(new Set());
-    setExpandedNodes(new Set());
-    setPathNodes(new Set());
-    setBulkSelectedNodes([]);
-    setPathSelectedNodes([]);
-    setClickedNode(null);
-    setClickedSummary('');
-    setActiveLinkContexts(new Set());
-    setSearchDockLinkId(null);
-    setSearchDockPosition(null);
-    setFoundPaths([]);
-    setError('');
-
-    setShowFeaturedPaths(false);
-    setShowSuggestions(false);
-    setSearchTerm(`${from} → ${to}`);
-
-    suppressHistoryRef.current = true;
-    setSearchLog([`[SUGGESTED] Seeding "${from}" and "${to}"...`]);
-    setSearchProgress(prev => ({ ...prev, isSearching: true, isPaused: false }));
-
-    void (async () => {
-      try {
-        const [startTitle, endTitle] = await Promise.all([addTopic(from, true), addTopic(to, true)]);
-        setSearchLog(prev => [...prev, `[SUGGESTED] Launching pathfinder...`].slice(-8));
-        await findPath(startTitle || from, endTitle || to);
-      } finally {
-        suppressHistoryRef.current = false;
+  const enqueueSearch = (from: string, to: string, source: 'suggested' | 'shift') => {
+    setSearchQueue(prev => {
+      if (prev.length >= 3 || searchQueueRef.current.length >= 3) {
+        setError('Search queue full (max 3).');
+        return prev;
       }
-    })();
+      const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const next = [...prev, { id, from, to, source }];
+      searchQueueRef.current = next;
+      setSearchTerminalMinimized(false);
+      return next;
+    });
+  };
+
+  const removeQueuedSearch = (id: string) => {
+    setSearchQueue(prev => {
+      const next = prev.filter(item => item.id !== id);
+      searchQueueRef.current = next;
+      return next;
+    });
+  };
+
+  const runQueuedSearch = async (job: { id: string; from: string; to: string; source: 'suggested' | 'shift' }) => {
+    isRunningSearchRef.current = true;
+    setActiveSearch(job);
+    setSearchTerminalMinimized(false);
+
+    const resetGraphForSuggested = async () => {
+      pushHistory();
+      mutationEpochRef.current++;
+      updateQueueRef.current?.clear();
+
+      if (graphManagerRef.current) graphManagerRef.current.clear();
+      setUserTypedNodes(new Set());
+      setAutoDiscoveredNodes(new Set());
+      setExpandedNodes(new Set());
+      setPathNodes(new Set());
+      setBulkSelectedNodes([]);
+      setPathSelectedNodes([]);
+      setClickedNode(null);
+      setClickedSummary('');
+      setActiveLinkContexts(new Set());
+      setSearchDockLinkId(null);
+      setSearchDockPosition(null);
+      setFoundPaths([]);
+      setError('');
+    };
+
+    try {
+      if (job.source === 'suggested') {
+        await resetGraphForSuggested();
+        setShowFeaturedPaths(false);
+        setShowSuggestions(false);
+        setSearchTerm(`${job.from} → ${job.to}`);
+        setSearchLog([`[QUEUE] Seeding "${job.from}" and "${job.to}"...`]);
+        setSearchProgress(prev => ({ ...prev, isSearching: true, isPaused: false }));
+      } else {
+        setSearchLog([`[QUEUE] Searching path: ${job.from} → ${job.to}`]);
+      }
+
+      const [startTitle, endTitle] = await Promise.all([addTopic(job.from, true), addTopic(job.to, true)]);
+      setSearchLog(prev => [...prev, `[QUEUE] Launching pathfinder...`].slice(-8));
+      await findPath(startTitle || job.from, endTitle || job.to);
+    } catch (err: any) {
+      setError(err?.message || 'Error during queued search');
+    } finally {
+      isRunningSearchRef.current = false;
+      setActiveSearch(null);
+      if (searchQueueRef.current.length > 0) {
+        const next = searchQueueRef.current[0];
+        searchQueueRef.current = searchQueueRef.current.slice(1);
+        setSearchQueue(searchQueueRef.current);
+        runQueuedSearch(next);
+      }
+    }
+  };
+
+  const runSuggestedPath = (from: string, to: string) => {
+    enqueueSearch(from, to, 'suggested');
   };
 
   const expandNode = async (title: string) => {
@@ -747,7 +808,7 @@ const WikiWebExplorer = () => {
           if (directLink) {
             // Optional: Auto-open context here?
           }
-          findPath(n1.id, n2.id);
+          enqueueSearch(n1.id, n2.id, 'shift');
         } else {
           setPathNodes(new Set()); setError('');
         }
@@ -858,6 +919,12 @@ const WikiWebExplorer = () => {
         keepSearching={keepSearching}
         onToggleKeepSearching={() => setKeepSearching(v => !v)}
         foundCount={foundPaths.length}
+        queue={searchQueue}
+        activeSearch={activeSearch}
+        onDeleteQueued={removeQueuedSearch}
+        isMinimized={searchTerminalMinimized}
+        onToggleMinimize={() => setSearchTerminalMinimized(v => !v)}
+        persistentVisible={keepSearching || searchQueue.length > 0 || Boolean(activeSearch)}
       />
 
       {/* Floating Node Details - Side Panel */}
