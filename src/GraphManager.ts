@@ -632,6 +632,35 @@ export class GraphManager {
   }
 
   private updateLinks() {
+    // Touch long-press (mobile) to mimic hover feedback on links
+    const longPressTimers = new WeakMap<SVGLineElement, number>();
+    const longPressStarts = new WeakMap<SVGLineElement, { x: number; y: number }>();
+    const longPressTriggered = new WeakMap<SVGLineElement, boolean>();
+
+    const highlightLink = (el: d3.Selection<SVGLineElement, any, any, any>) => {
+      el.attr('stroke', '#00ffff')
+        .attr('stroke-width', 6)
+        .attr('stroke-opacity', 1);
+    };
+
+    const resetLink = (el: d3.Selection<SVGLineElement, any, any, any>, d: Link) => {
+      this.applyLinkStyles(el as any, d);
+    };
+
+    const clearLongPress = (el: SVGLineElement, d: Link, shouldReset = true) => {
+      const timer = longPressTimers.get(el);
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+        longPressTimers.delete(el);
+      }
+      const wasTriggered = longPressTriggered.get(el);
+      if (shouldReset && wasTriggered) {
+        resetLink(d3.select(el), d);
+      }
+      longPressTriggered.delete(el);
+      longPressStarts.delete(el);
+    };
+
     const linkElements = this.linksGroup
       .selectAll('line')
       .data(this.links, (d: any) => {
@@ -667,16 +696,50 @@ export class GraphManager {
           this.callbacks.onLinkClick(d, event);
         }
       })
-      .on('mouseover', function () {
-        d3.select(this)
-          .attr('stroke', '#00ffff')
-          .attr('stroke-width', 6)
-          .attr('stroke-opacity', 1);
+      .on('mouseover', (event) => {
+        highlightLink(d3.select(event.currentTarget as SVGLineElement));
       })
       .on('mouseout', (event, d) => {
         // Re-apply original styles based on metadata
         const el = d3.select(event.currentTarget);
-        this.applyLinkStyles(el as any, d);
+        resetLink(el as any, d);
+      })
+      .on('pointerdown', (event, d) => {
+        if (event.pointerType !== 'touch') return;
+        const el = event.currentTarget as SVGLineElement;
+        longPressStarts.set(el, { x: event.clientX, y: event.clientY });
+        longPressTriggered.set(el, false);
+        const timer = window.setTimeout(() => {
+          longPressTriggered.set(el, true);
+          highlightLink(d3.select(el));
+        }, 280);
+        longPressTimers.set(el, timer);
+      })
+      .on('pointermove', (event, d) => {
+        if (event.pointerType !== 'touch') return;
+        const el = event.currentTarget as SVGLineElement;
+        const start = longPressStarts.get(el);
+        if (!start) return;
+        const dx = event.clientX - start.x;
+        const dy = event.clientY - start.y;
+        if (Math.sqrt(dx * dx + dy * dy) > 8) {
+          clearLongPress(el, d);
+        }
+      })
+      .on('pointerup', (event, d) => {
+        if (event.pointerType !== 'touch') return;
+        const el = event.currentTarget as SVGLineElement;
+        clearLongPress(el, d);
+      })
+      .on('pointercancel', (event, d) => {
+        if (event.pointerType !== 'touch') return;
+        const el = event.currentTarget as SVGLineElement;
+        clearLongPress(el, d);
+      })
+      .on('pointerleave', (event, d) => {
+        if (event.pointerType !== 'touch') return;
+        const el = event.currentTarget as SVGLineElement;
+        clearLongPress(el, d);
       });
 
     // Animate in newly created links
