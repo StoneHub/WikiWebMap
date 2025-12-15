@@ -34,25 +34,27 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
     onDeleteSelection,
 }) => {
     return (
-        <div className="absolute bottom-44 right-6 z-20 flex flex-col items-end gap-3">
-            <button
-                onClick={() => setShowSettings(!showSettings)}
-                className="w-12 h-12 bg-gray-800/80 backdrop-blur-md border border-gray-600/50 rounded-full shadow-xl flex items-center justify-center hover:bg-gray-700 text-gray-300 transition-all hover:scale-105"
-                title="Settings"
-            >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth="2"
-                        d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"
-                    ></path>
-                </svg>
-            </button>
+        <div className="fixed bottom-3 right-3 md:bottom-8 md:right-6 z-20 flex flex-col items-end gap-2 md:gap-3 pointer-events-none">
+            <div className="pointer-events-auto">
+                <button
+                    onClick={() => setShowSettings(!showSettings)}
+                    className="w-12 h-12 bg-gray-800/80 backdrop-blur-md border border-gray-600/50 rounded-full shadow-xl flex items-center justify-center hover:bg-gray-700 text-gray-300 transition-all hover:scale-105"
+                    title="Settings"
+                >
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth="2"
+                            d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"
+                        ></path>
+                    </svg>
+                </button>
+            </div>
 
             {/* Settings Bubble */}
             {showSettings && (
-                <div className="bg-gray-800/90 backdrop-blur-md border border-gray-700/50 rounded-2xl p-4 shadow-2xl w-64 mb-1 animate-fade-in-up">
+                <div className="bg-gray-800/90 backdrop-blur-md border border-gray-700/50 rounded-2xl p-4 shadow-2xl w-full md:w-64 animate-fade-in-up pointer-events-auto">
                     <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">
                         Graph Physics
                     </h3>
@@ -130,23 +132,25 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                 </div>
             )}
 
-            <button
-                onClick={onPruneLeaves}
-                className="h-12 px-6 bg-gray-800/80 hover:bg-gray-700/80 backdrop-blur-md border border-gray-600/50 rounded-full shadow-xl flex items-center gap-2 text-gray-200 hover:text-white transition-all hover:scale-105"
-                title="Remove nodes with fewer than 2 connections"
-            >
-                <span className="text-lg">✂️</span>
-                <span className="font-semibold text-sm">Prune</span>
-            </button>
+            <div className="flex w-full md:w-auto gap-2 bg-gray-900/80 backdrop-blur-md border border-gray-700/60 rounded-2xl p-2 shadow-2xl pointer-events-auto">
+                <button
+                    onClick={onPruneLeaves}
+                    className="h-12 px-5 bg-gray-800/80 hover:bg-gray-700/80 border border-gray-600/50 rounded-xl shadow-xl flex-1 md:flex-none flex items-center justify-center gap-2 text-gray-200 hover:text-white transition-all hover:scale-[1.02]"
+                    title="Remove nodes with fewer than 2 connections"
+                >
+                    <span className="text-lg">✂️</span>
+                    <span className="font-semibold text-sm">Prune</span>
+                </button>
 
-            <button
-                onClick={onDeleteSelection}
-                className="h-12 px-6 bg-gray-800/70 hover:bg-red-900/80 backdrop-blur-md border border-gray-600/50 hover:border-red-500/50 rounded-full shadow-xl flex items-center gap-2 text-gray-200 hover:text-white transition-all hover:scale-105"
-                title="Delete Alt/Option+Drag selected nodes"
-            >
-                <span className="text-lg">🗑️</span>
-                <span className="font-semibold text-sm">Delete Selection</span>
-            </button>
+                <button
+                    onClick={onDeleteSelection}
+                    className="h-12 px-5 bg-gray-800/70 hover:bg-red-900/80 border border-gray-600/50 hover:border-red-500/50 rounded-xl shadow-xl flex-1 md:flex-none flex items-center justify-center gap-2 text-gray-200 hover:text-white transition-all hover:scale-[1.02]"
+                    title="Delete Alt/Option+Drag selected nodes"
+                >
+                    <span className="text-lg">🗑️</span>
+                    <span className="font-semibold text-sm">Delete</span>
+                </button>
+            </div>
         </div>
     );
 };

@@ -5,7 +5,7 @@ type LensingNode = { x: number; y: number; mass: number };
 
 // Single knob for the whole background effect.
 // 0 = subtle/near-off, 1 = strong.
-const EFFECT_INTENSITY = 2;
+const EFFECT_INTENSITY = 1;
 
 function displacePoint(x: number, y: number, masses: LensingNode[]) {
   const intensity = Math.min(1.5, Math.max(0, EFFECT_INTENSITY));

@@ -824,7 +824,6 @@ const WikiWebExplorer = () => {
         }}
         onAddTopic={addTopicFromSearchUI}
         onRunSuggestedPath={runSuggestedPath}
-        onAutoTest={() => runSuggestedPath('Facebook', 'First Amendment')}
       />
 
       {/* Floating Controls */}
