@@ -1,0 +1,21 @@
+# WikiWebMap - Robots.txt
+# This file helps prevent automated bot abuse
+
+User-agent: *
+# Allow general crawling of the site
+Allow: /
+
+# Reasonable crawl delay to prevent aggressive scraping
+Crawl-delay: 2
+
+# Block known bad bots and scrapers
+User-agent: AhrefsBot
+User-agent: SemrushBot
+User-agent: DotBot
+User-agent: MJ12bot
+User-agent: BLEXBot
+User-agent: PetalBot
+Disallow: /
+
+# Sitemap (you can add this later if needed)
+# Sitemap: https://wikiconnectionsmap.web.app/sitemap.xml
