@@ -13,12 +13,11 @@ This project is moving toward an imperative D3 `GraphManager` + React UI shell. 
 ### Bulk Selection & Actions
 - [~] Click-and-drag (box) selection in `GraphManager` (implemented + wired; needs UX polish)
 - [x] Visualize selected nodes (`isSelected` metadata wired for both path + box selection)
-- [ ] Show “Trashcan” icon when nodes are selected (drop-zone exists in drag logic, UI affordance missing)
-- [ ] Bulk deletion logic (only single-node delete exists)
+- [ ] Bulk deletion UX (drag-to-trash removed to avoid accidental deletes; revisit safer multi-select delete options)
 
 ### Data Visualization Planning
 - [ ] Brainstorm graph types and data sources
-- [ ] Proposal for “spawnable” graphs
+- [ ] Proposal for "spawnable" graphs
 
 ### Auto-Test Reliability
 - [~] Replace “Facebook -> Typo” auto-test with deterministic path (now seeds `Physics` + `Science`)
@@ -38,6 +37,12 @@ This project is moving toward an imperative D3 `GraphManager` + React UI shell. 
 1. Add trash UI + bulk delete (button + drop-zone affordance), and keep selection visualization in sync.
 2. Polish bulk selection UX (selection modifier keys, clear selection, avoid conflicts with path endpoint selection).
 3. Add “Viewed” state and styling (clicked/read), differentiating from “Expanded”.
-4. Data visualization planning: define “spawnable graph” formats + data sources.
-5. Improve auto-test further (optional “Kevin Bacon” → “Hollywood”, reduce timing/polling).
+4. Data visualization planning: define "spawnable graph" formats + data sources.
+5. Improve auto-test further (optional "Kevin Bacon" → "Hollywood", reduce timing/polling).
 6. Fix local build tooling (`vite build` currently fails due to Rollup optional dependency install).
+
+### Mobile UX Overhaul Prompt
+- Menus and overlays overwhelm small screens; consolidate controls into a single icon + drawer or bottom sheet on widths under ~768px.
+- Shrink padding/typography for floating panels, and ensure search/results stacks as full-width rows with tap-friendly targets.
+- Reserve more canvas space on mobile (reduce persistent chrome); test pan/zoom/drag gestures without hover-only affordances.
+- Node details/log panels should dock as slide-up sheets with dismiss handles rather than fixed sidebars on mobile.

@@ -29,8 +29,6 @@ export interface GraphCallbacks {
   onNodeClick?: (node: Node, event: MouseEvent) => void;
   onNodeDoubleClick?: (node: Node, event: MouseEvent) => void;
   onNodeDragStart?: (node: Node) => void;
-  onNodeDropInTrash?: (nodeId: string) => void;
-  onDragTrashState?: (state: { isDragging: boolean; isOverTrash: boolean }) => void;
   onLinkClick?: (link: Link, event: MouseEvent) => void;
   onLinksApplied?: (args: { added: Link[]; updated: Link[] }) => void;
   onStatsUpdate?: (stats: { nodeCount: number; linkCount: number }) => void;
@@ -82,11 +80,6 @@ export class GraphManager {
   // Drag state
   private dragThreshold = 5;
   private dragStartPos: { x: number; y: number } | null = null;
-  private isDraggingOverTrash = false;
-
-  // Trash zone (screen space relative to SVG viewport)
-  private static readonly TRASH_SIZE = 140;
-  private static readonly TRASH_MARGIN = 16;
 
   constructor(svgElement: SVGSVGElement, callbacks: GraphCallbacks = {}) {
     this.svg = d3.select(svgElement);
@@ -949,8 +942,6 @@ export class GraphManager {
     return d3.drag<SVGGElement, Node>()
       .on('start', (event, d) => {
         this.dragStartPos = { x: event.x, y: event.y };
-        this.isDraggingOverTrash = false;
-        this.callbacks.onDragTrashState?.({ isDragging: true, isOverTrash: false });
 
         if (!event.active) this.simulation.alphaTarget(0.3).restart();
         d.fx = d.x;
@@ -972,12 +963,6 @@ export class GraphManager {
           d.fx = event.x;
           d.fy = event.y;
         }
-
-        const overTrash = this.isPointInTrashZone(event.x, event.y);
-        if (overTrash !== this.isDraggingOverTrash) {
-          this.isDraggingOverTrash = overTrash;
-          this.callbacks.onDragTrashState?.({ isDragging: true, isOverTrash: overTrash });
-        }
       })
       .on('end', (event, d) => {
         if (!event.active) this.simulation.alphaTarget(0);
@@ -987,33 +972,13 @@ export class GraphManager {
         const distance = Math.sqrt(dx * dx + dy * dy);
 
         if (distance > this.dragThreshold) {
-          // Drag end (no-op hook removed)
-        }
-
-        if (this.isDraggingOverTrash) {
-          this.callbacks.onNodeDropInTrash?.(d.id);
+          // Drag end (no-op hook kept for future drag end handling)
         }
 
         d.fx = null;
         d.fy = null;
         this.dragStartPos = null;
-        this.isDraggingOverTrash = false;
-        this.callbacks.onDragTrashState?.({ isDragging: false, isOverTrash: false });
       });
-  }
-
-  private isPointInTrashZone(worldX: number, worldY: number) {
-    const t = d3.zoomTransform(this.svg.node()!);
-    const screenX = t.applyX(worldX);
-    const screenY = t.applyY(worldY);
-    const rect = this.svg.node()!.getBoundingClientRect();
-    const size = GraphManager.TRASH_SIZE;
-    const margin = GraphManager.TRASH_MARGIN;
-    const x0 = rect.width - margin - size;
-    const x1 = rect.width - margin;
-    const y0 = rect.height - margin - size;
-    const y1 = rect.height - margin;
-    return screenX >= x0 && screenX <= x1 && screenY >= y0 && screenY <= y1;
   }
 
   private onTick() {

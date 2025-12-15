@@ -168,10 +168,6 @@ const WikiWebExplorer = () => {
   const [nodeSpacing, setNodeSpacing] = useState(150);
   const [recursionDepth, setRecursionDepth] = useState(3);
   const [nodeSizeScale, setNodeSizeScale] = useState(1);
-  const [trashState, setTrashState] = useState<{ isDragging: boolean; isOverTrash: boolean }>({
-    isDragging: false,
-    isOverTrash: false,
-  });
 
   const shuffleFeaturedPaths = () => {
     const src = SUGGESTED_PATHS;
@@ -235,8 +231,6 @@ const WikiWebExplorer = () => {
       onNodeDoubleClick: (node, event) => handleNodeDoubleClick(event as any, node),
       onLinkClick: (link, event) => handleLinkClick(event as any, link),
       onSelectionChange: (nodes) => setBulkSelectedNodes(nodes),
-      onNodeDropInTrash: (nodeId) => deleteNodeImperative(nodeId),
-      onDragTrashState: (state) => setTrashState(state),
       onLinksApplied: ({ added, updated }) => {
         const normalize = (l: Link) => {
           const source = typeof l.source === 'object' ? l.source.id : l.source;
@@ -892,20 +886,6 @@ const WikiWebExplorer = () => {
           })
         }
       />
-
-      {/* Trash Zone */}
-      <div className="absolute bottom-4 right-4 z-10 pointer-events-none">
-        <div
-          className={`w-[140px] h-[140px] rounded-2xl border-2 border-dashed flex items-center justify-center text-center text-xs font-semibold transition-all ${trashState.isDragging
-            ? trashState.isOverTrash
-              ? 'border-red-400 bg-red-500/15 text-red-200 shadow-[0_0_30px_rgba(239,68,68,0.25)]'
-              : 'border-gray-600 bg-black/10 text-gray-300'
-            : 'border-gray-700/60 bg-black/5 text-gray-500'
-            }`}
-        >
-          {trashState.isDragging ? (trashState.isOverTrash ? 'Release\nto Delete' : 'Drag Here\nto Delete') : 'Trash'}
-        </div>
-      </div>
 
       {/* Connection Analytics */}
       <LogPanel />
