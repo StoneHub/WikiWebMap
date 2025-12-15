@@ -91,8 +91,8 @@ export async function runPathfinder(args: {
       }
       const { title, depth } = queue.shift()!;
 
-      if (foundDepth !== null && depth >= foundDepth) {
-        // We've already found the shortest path length; no need to explore deeper for more shortest paths.
+      if (foundDepth !== null && depth >= foundDepth && !args.keepSearchingRef.current) {
+        // We've already found the shortest path length; no need to explore deeper unless keepSearching is on.
         break;
       }
 
@@ -150,8 +150,10 @@ export async function runPathfinder(args: {
 
     if (foundDepth === null) {
       if (!args.searchAbortRef.current) {
-        args.setError('No path found within search limits.');
-        args.setSearchLog(prev => [...prev, `[FAILURE] Target not found in search horizon.`].slice(-8));
+        args.setError('No path found. Try a related topic or increase depth, then search again.');
+        args.setSearchLog(prev =>
+          [...prev, `[FAILURE] Target not found. Try related topics or increase depth.`].slice(-8)
+        );
       }
       return;
     }
