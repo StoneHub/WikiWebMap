@@ -29,7 +29,10 @@ export interface GraphCallbacks {
   onNodeClick?: (node: Node, event: MouseEvent) => void;
   onNodeDoubleClick?: (node: Node, event: MouseEvent) => void;
   onNodeDragStart?: (node: Node) => void;
+  onNodeDropInTrash?: (nodeId: string) => void;
+  onDragTrashState?: (state: { isDragging: boolean; isOverTrash: boolean }) => void;
   onLinkClick?: (link: Link, event: MouseEvent) => void;
+  onLinksApplied?: (args: { added: Link[]; updated: Link[] }) => void;
   onStatsUpdate?: (stats: { nodeCount: number; linkCount: number }) => void;
   onSelectionChange?: (selectedNodes: Node[]) => void;
 }
@@ -45,6 +48,7 @@ export interface NodeMetadata {
   isPathEndpoint: boolean;
   isBulkSelected: boolean;
   isDimmed: boolean;
+  isDimmedByPath: boolean;
   thumbnail?: string;
   colorSeed?: string;
   colorRole?: 'root' | 'child';
@@ -78,6 +82,11 @@ export class GraphManager {
   // Drag state
   private dragThreshold = 5;
   private dragStartPos: { x: number; y: number } | null = null;
+  private isDraggingOverTrash = false;
+
+  // Trash zone (screen space relative to SVG viewport)
+  private static readonly TRASH_SIZE = 140;
+  private static readonly TRASH_MARGIN = 16;
 
   constructor(svgElement: SVGSVGElement, callbacks: GraphCallbacks = {}) {
     this.svg = d3.select(svgElement);
@@ -182,7 +191,8 @@ export class GraphManager {
             isBulkSelected: false,
             colorSeed: undefined,
             colorRole: undefined,
-            isDimmed: false // Default to false
+            isDimmed: false, // Focus dimming
+            isDimmedByPath: false // Path dimming
           });
         }
       }
@@ -201,6 +211,8 @@ export class GraphManager {
    */
   addLinks(newLinks: Link[]) {
     let added = 0;
+    const addedLinks: Link[] = [];
+    const updatedLinks: Link[] = [];
 
     newLinks.forEach(link => {
       const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
@@ -222,9 +234,13 @@ export class GraphManager {
           if (!link.id) link.id = `${sourceId}-${targetId}`;
           this.links.push(link);
           added++;
+          addedLinks.push(link);
         } else {
           // Update metadata/upgrade link
-          if (link.type === 'path') existingLink.type = 'path';
+          if (link.type === 'path' && existingLink.type !== 'path') {
+            existingLink.type = 'path';
+            updatedLinks.push(existingLink);
+          }
           if (link.context && !existingLink.context) existingLink.context = link.context; // Enrich
         }
       }
@@ -235,6 +251,14 @@ export class GraphManager {
       this.simulation.alpha(0.3).restart();
       this.updateDOM();
       this.notifyStats();
+    }
+
+    if (updatedLinks.length > 0 && added === 0) {
+      this.updateDOM();
+    }
+
+    if ((addedLinks.length > 0 || updatedLinks.length > 0) && this.callbacks.onLinksApplied) {
+      this.callbacks.onLinksApplied({ added: addedLinks, updated: updatedLinks });
     }
   }
 
@@ -315,7 +339,8 @@ export class GraphManager {
       isBulkSelected: false,
       colorSeed: undefined,
       colorRole: undefined,
-      isDimmed: false
+      isDimmed: false,
+      isDimmedByPath: false
     };
 
     const newMeta = { ...existing, ...metadata };
@@ -419,7 +444,8 @@ export class GraphManager {
         isBulkSelected: false,
         colorSeed: undefined,
         colorRole: undefined,
-        isDimmed: false
+        isDimmed: false,
+        isDimmedByPath: false
       };
 
       this.nodeMetadata.set(nodeId, { ...existing, ...metadata });
@@ -454,6 +480,19 @@ export class GraphManager {
       });
     }
 
+    this.updateDOM();
+  }
+
+  /**
+   * Dim non-path nodes while a path is active.
+   */
+  setPathHighlight(pathNodeIds: Set<string> | null) {
+    const active = pathNodeIds && pathNodeIds.size > 0;
+    this.nodes.forEach(n => {
+      const meta = this.nodeMetadata.get(n.id);
+      if (!meta) return;
+      meta.isDimmedByPath = active ? !pathNodeIds!.has(n.id) : false;
+    });
     this.updateDOM();
   }
 
@@ -495,6 +534,32 @@ export class GraphManager {
     (this.simulation.force('link') as d3.ForceLink<Node, Link>).links(this.links);
     this.updateDOM();
     this.notifyStats();
+  }
+
+  resize(width: number, height: number) {
+    const nextW = Math.max(1, Math.floor(width));
+    const nextH = Math.max(1, Math.floor(height));
+    if (nextW === this.width && nextH === this.height) return;
+    this.width = nextW;
+    this.height = nextH;
+    (this.simulation.force('center') as d3.ForceCenter<Node>).x(this.width / 2).y(this.height / 2);
+    this.simulation.alpha(0.2).restart();
+  }
+
+  hasNode(nodeId: string) {
+    return this.nodes.some(n => n.id === nodeId);
+  }
+
+  getNodeIds() {
+    return this.nodes.map(n => n.id);
+  }
+
+  getNodeDegree(nodeId: string) {
+    return this.links.filter(l => {
+      const sourceId = typeof l.source === 'object' ? l.source.id : l.source;
+      const targetId = typeof l.target === 'object' ? l.target.id : l.target;
+      return sourceId === nodeId || targetId === nodeId;
+    }).length;
   }
 
   getStateSnapshot(): GraphStateSnapshot {
@@ -646,20 +711,24 @@ export class GraphManager {
     const sourceMeta = this.nodeMetadata.get(sourceId);
     const targetMeta = this.nodeMetadata.get(targetId);
 
+    const isDimmed =
+      Boolean(sourceMeta?.isDimmed || sourceMeta?.isDimmedByPath) ||
+      Boolean(targetMeta?.isDimmed || targetMeta?.isDimmedByPath);
+
     const stroke = (() => {
-      if (sourceMeta?.isDimmed || targetMeta?.isDimmed) return '#555';
+      if (isDimmed) return '#555';
       if (sourceMeta?.isInPath && targetMeta?.isInPath) return '#00ff88';
       return '#888';
     })();
 
     const strokeWidth = (() => {
-      if (sourceMeta?.isDimmed || targetMeta?.isDimmed) return 1;
+      if (isDimmed) return 1;
       if (sourceMeta?.isInPath && targetMeta?.isInPath) return 4;
       return 3;
     })();
 
     const strokeOpacity = (() => {
-      if (sourceMeta?.isDimmed || targetMeta?.isDimmed) return 0.2;
+      if (isDimmed) return 0.12;
       return 0.6;
     })();
 
@@ -721,8 +790,11 @@ export class GraphManager {
       const inner = group.append('g').attr('class', 'node-inner');
       const meta: Partial<NodeMetadata> = this.nodeMetadata.get(d.id) || {};
 
-      // Update opacity based on dimming
-      group.attr('opacity', meta.isDimmed ? 0.4 : 1);
+      // Update opacity based on dimming (focus vs path)
+      const isDimmedByPath = Boolean(meta.isDimmedByPath);
+      const isDimmedByFocus = Boolean(meta.isDimmed);
+      const opacity = isDimmedByPath ? 0.15 : isDimmedByFocus ? 0.4 : 1;
+      group.attr('opacity', opacity);
 
       // Calculate radius based on connections
       const connections = this.links.filter(l => {
@@ -806,42 +878,15 @@ export class GraphManager {
   private getNodeColor(_nodeId: string, meta: Partial<NodeMetadata>): string {
     if (meta.isInPath) return '#00ff88'; // Green for path
     if (meta.isCurrentlyExploring) return '#ffdd00'; // Yellow for currently exploring
-    if (meta.isPathEndpoint) return '#00ffff'; // Cyan for path endpoints
+    if (meta.isPathEndpoint) return '#ff8800'; // Orange for selected path endpoints
     if (meta.isBulkSelected) return '#ff8800'; // Orange for bulk-selected
-    if (meta.isRecentlyAdded) return '#ff00ff'; // Magenta for newly added
-    if (meta.colorSeed) {
-      const seedHue = this.hashToHue(meta.colorSeed);
-      const nodeHueOffset = this.hashToSignedOffset(_nodeId, 10);
-      const hue = (seedHue + nodeHueOffset + 360) % 360;
-      const isRoot = meta.colorRole === 'root';
-      const sat = isRoot ? 82 : 52;
-      const light = isRoot ? 55 : 42;
-      return `hsl(${hue} ${sat}% ${light}%)`;
-    }
     if (meta.isUserTyped) return '#0088ff'; // Blue for user-typed (fallback)
     if (meta.isAutoDiscovered) return '#9966ff'; // Purple for auto-discovered (fallback)
     return '#0088ff'; // Default blue (fallback)
   }
 
-  private hashToHue(input: string): number {
-    let hash = 0;
-    for (let i = 0; i < input.length; i++) {
-      hash = (hash * 31 + input.charCodeAt(i)) | 0;
-    }
-    return Math.abs(hash) % 360;
-  }
-
-  private hashToSignedOffset(input: string, maxAbs: number): number {
-    let hash = 0;
-    for (let i = 0; i < input.length; i++) {
-      hash = (hash * 33 + input.charCodeAt(i)) | 0;
-    }
-    const range = maxAbs * 2 + 1;
-    return (Math.abs(hash) % range) - maxAbs;
-  }
-
   private getNodeStroke(meta: Partial<NodeMetadata>): string {
-    if (meta.isPathEndpoint) return '#00ffff'; // Cyan stroke for endpoints
+    if (meta.isPathEndpoint) return '#ffdd00'; // Yellow stroke for endpoints
     if (meta.isBulkSelected) return '#ffff00'; // Yellow stroke for bulk-selected
     if (meta.isCurrentlyExploring) return '#ff6600'; // Orange stroke for exploring
     if (meta.isExpanded) return '#00ffff'; // Cyan for expanded
@@ -904,6 +949,8 @@ export class GraphManager {
     return d3.drag<SVGGElement, Node>()
       .on('start', (event, d) => {
         this.dragStartPos = { x: event.x, y: event.y };
+        this.isDraggingOverTrash = false;
+        this.callbacks.onDragTrashState?.({ isDragging: true, isOverTrash: false });
 
         if (!event.active) this.simulation.alphaTarget(0.3).restart();
         d.fx = d.x;
@@ -925,6 +972,12 @@ export class GraphManager {
           d.fx = event.x;
           d.fy = event.y;
         }
+
+        const overTrash = this.isPointInTrashZone(event.x, event.y);
+        if (overTrash !== this.isDraggingOverTrash) {
+          this.isDraggingOverTrash = overTrash;
+          this.callbacks.onDragTrashState?.({ isDragging: true, isOverTrash: overTrash });
+        }
       })
       .on('end', (event, d) => {
         if (!event.active) this.simulation.alphaTarget(0);
@@ -937,10 +990,30 @@ export class GraphManager {
           // Drag end (no-op hook removed)
         }
 
+        if (this.isDraggingOverTrash) {
+          this.callbacks.onNodeDropInTrash?.(d.id);
+        }
+
         d.fx = null;
         d.fy = null;
         this.dragStartPos = null;
+        this.isDraggingOverTrash = false;
+        this.callbacks.onDragTrashState?.({ isDragging: false, isOverTrash: false });
       });
+  }
+
+  private isPointInTrashZone(worldX: number, worldY: number) {
+    const t = d3.zoomTransform(this.svg.node()!);
+    const screenX = t.applyX(worldX);
+    const screenY = t.applyY(worldY);
+    const rect = this.svg.node()!.getBoundingClientRect();
+    const size = GraphManager.TRASH_SIZE;
+    const margin = GraphManager.TRASH_MARGIN;
+    const x0 = rect.width - margin - size;
+    const x1 = rect.width - margin;
+    const y0 = rect.height - margin - size;
+    const y1 = rect.height - margin;
+    return screenX >= x0 && screenX <= x1 && screenY >= y0 && screenY <= y1;
   }
 
   private onTick() {

@@ -14,6 +14,7 @@ interface SearchOverlayProps {
     featuredPaths: SuggestedPath[];
     onShuffleFeaturedPaths: () => void;
     onRunSuggestedPath: (from: string, to: string) => void;
+    onAutoTest: () => void;
     showFeaturedPaths: boolean;
     onFocusSearch: () => void;
     onBlurSearch: () => void;
@@ -32,6 +33,7 @@ export const SearchOverlay: React.FC<SearchOverlayProps> = ({
     featuredPaths,
     onShuffleFeaturedPaths,
     onRunSuggestedPath,
+    onAutoTest,
     showFeaturedPaths,
     onFocusSearch,
     onBlurSearch,
@@ -112,13 +114,23 @@ export const SearchOverlay: React.FC<SearchOverlayProps> = ({
                     </div>
                 )}
 
-                <button
-                    onClick={() => onAddTopic(searchTerm)}
-                    disabled={loading || !searchTerm}
-                    className="w-full py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl text-sm font-semibold shadow-lg transition-all transform active:scale-95 text-white"
-                >
-                    {loading ? 'Thinking...' : 'Start Exploration'}
-                </button>
+                <div className="grid grid-cols-2 gap-2">
+                    <button
+                        onClick={() => onAddTopic(searchTerm)}
+                        disabled={loading || !searchTerm}
+                        className="col-span-2 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl text-sm font-semibold shadow-lg transition-all transform active:scale-95 text-white"
+                    >
+                        {loading ? 'Thinking...' : 'Start Exploration'}
+                    </button>
+                    <button
+                        onClick={onAutoTest}
+                        type="button"
+                        className="col-span-2 py-2 bg-gray-900/40 hover:bg-gray-900/55 border border-gray-700/60 rounded-xl text-xs font-semibold text-gray-200 transition-all"
+                        title='Auto demo: "Facebook" → "First Amendment"'
+                    >
+                        Auto Test: Facebook → First Amendment
+                    </button>
+                </div>
 
                 {error && (
                     <div

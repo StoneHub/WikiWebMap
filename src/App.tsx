@@ -12,6 +12,8 @@ import { LensingGridBackground } from './components/LensingGridBackground';
 import type { SearchProgress } from './types/SearchProgress';
 import { runPathfinder } from './features/pathfinding/runPathfinder';
 import { SUGGESTED_PATHS, type SuggestedPath } from './data/suggestedPaths';
+import LogPanel from './components/LogPanel';
+import { connectionLogger } from './ConnectionLogger';
 
 const WikiWebExplorer = () => {
   // UI state
@@ -58,7 +60,7 @@ const WikiWebExplorer = () => {
   const [keepSearching, setKeepSearching] = useState(false);
 
   // Settings Visibility
-  const [showSettings, setShowSettings] = useState(false);
+  const [showSettings, setShowSettings] = useState(true);
   const [apiContactEmail, setApiContactEmail] = useState(() => {
     const fromStorage = localStorage.getItem('wikiApiContactEmail') || '';
     const fromEnv = (import.meta.env.VITE_WIKI_API_CONTACT_EMAIL as string | undefined) || '';
@@ -164,8 +166,12 @@ const WikiWebExplorer = () => {
 
   // Visual settings
   const [nodeSpacing, setNodeSpacing] = useState(150);
-  const [searchDepth, setSearchDepth] = useState(2);
+  const [recursionDepth, setRecursionDepth] = useState(3);
   const [nodeSizeScale, setNodeSizeScale] = useState(1);
+  const [trashState, setTrashState] = useState<{ isDragging: boolean; isOverTrash: boolean }>({
+    isDragging: false,
+    isOverTrash: false,
+  });
 
   const shuffleFeaturedPaths = () => {
     const src = SUGGESTED_PATHS;
@@ -229,6 +235,24 @@ const WikiWebExplorer = () => {
       onNodeDoubleClick: (node, event) => handleNodeDoubleClick(event as any, node),
       onLinkClick: (link, event) => handleLinkClick(event as any, link),
       onSelectionChange: (nodes) => setBulkSelectedNodes(nodes),
+      onNodeDropInTrash: (nodeId) => deleteNodeImperative(nodeId),
+      onDragTrashState: (state) => setTrashState(state),
+      onLinksApplied: ({ added, updated }) => {
+        const normalize = (l: Link) => {
+          const source = typeof l.source === 'object' ? l.source.id : l.source;
+          const target = typeof l.target === 'object' ? l.target.id : l.target;
+          return { source, target, type: (l.type || 'auto') as any };
+        };
+
+        added.forEach(l => {
+          const { source, target, type } = normalize(l);
+          connectionLogger.log(source, target, type);
+        });
+        updated.forEach(l => {
+          const { source, target } = normalize(l);
+          connectionLogger.log(source, target, 'path');
+        });
+      },
       onStatsUpdate: (stats) => {
         setNodeCount(stats.nodeCount);
         setLinkCount(stats.linkCount);
@@ -289,6 +313,19 @@ const WikiWebExplorer = () => {
       }
     };
   }, []); // Initialize once; tracking uses refs
+
+  useEffect(() => {
+    const onResize = () => {
+      const svg = svgRef.current;
+      const gm = graphManagerRef.current;
+      if (!svg || !gm) return;
+      const rect = svg.getBoundingClientRect();
+      gm.resize(rect.width, rect.height);
+    };
+    window.addEventListener('resize', onResize);
+    onResize();
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   // Sync settings
   useEffect(() => {
@@ -408,18 +445,10 @@ const WikiWebExplorer = () => {
 
       setAutoDiscoveredNodes(prev => new Set([...prev, ...newAutoDiscovered]));
 
-      // Color grouping: root + its direct children
-      graphManagerRef.current?.setNodesMetadata([
-        { nodeId: resolvedTitle, metadata: { colorSeed: resolvedTitle, colorRole: 'root' } },
-        ...Array.from(newAutoDiscovered).map(id => ({
-          nodeId: id,
-          metadata: { colorSeed: resolvedTitle, colorRole: 'child' as const },
-        })),
-      ]);
-
       // Auto-connect existing
-      const cachedNodes = WikiService.getCachedNodes();
-      cachedNodes.forEach(existingNodeId => {
+      const graphNodeIds = new Set(graphManagerRef.current?.getNodeIds() || []);
+      WikiService.getCachedNodes().forEach(existingNodeId => {
+        if (!graphNodeIds.has(existingNodeId)) return;
         const cachedLinks = WikiService.getLinksFromCache(existingNodeId);
         const match = cachedLinks?.find(l => l.title === resolvedTitle);
         if (match) {
@@ -566,7 +595,7 @@ const WikiWebExplorer = () => {
     runPathfinder({
       startInput,
       endInput,
-      maxDepth: searchDepth,
+      maxDepth: recursionDepth * 2,
       keepSearchingRef,
       graphManagerRef,
       searchAbortRef,
@@ -637,18 +666,15 @@ const WikiWebExplorer = () => {
       if (epoch !== mutationEpochRef.current) return;
       pushHistory();
 
-      const existingNodes = WikiService.getCachedNodes();
+      const gm = graphManagerRef.current;
+      const existingGraphNodeIds = new Set(gm?.getNodeIds() || []);
       const scores: Record<string, number> = {};
 
       linksWithContext.forEach(linkObj => {
         const candidate = linkObj.title;
-        scores[candidate] = 0;
-        if (graphManagerRef.current?.getStats().nodeCount && WikiService.getLinksFromCache(candidate)) scores[candidate] += 50;
-        existingNodes.forEach(existing => {
-          if (existing === title) return;
-          const existingLinks = WikiService.getLinksFromCache(existing);
-          if (existingLinks && existingLinks.some(l => l.title === candidate)) scores[candidate] += 10;
-        });
+        const inGraph = existingGraphNodeIds.has(candidate);
+        const degree = inGraph ? (gm?.getNodeDegree(candidate) || 0) : 0;
+        scores[candidate] = (inGraph ? 50 : 0) + degree * 10;
       });
 
       const sortedCandidates = linksWithContext.sort((a, b) => (scores[b.title] || 0) - (scores[a.title] || 0)).slice(0, 15);
@@ -668,7 +694,8 @@ const WikiWebExplorer = () => {
           context: linkObj.context
         });
 
-        existingNodes.forEach(existing => {
+        existingGraphNodeIds.forEach(existing => {
+          if (existing === title) return;
           const existingLinks = WikiService.getLinksFromCache(existing);
           const match = existingLinks?.find(l => l.title === link);
           if (match) linksToAdd.push({
@@ -683,15 +710,6 @@ const WikiWebExplorer = () => {
 
       if (nodesToAdd.length === 0) setError('No relevant connections found.');
       else {
-        // Color grouping: expanded node + its direct children
-        graphManagerRef.current?.setNodesMetadata([
-          { nodeId: title, metadata: { colorSeed: title, colorRole: 'root' } },
-          ...Array.from(newAutoDiscovered).map(id => ({
-            nodeId: id,
-            metadata: { colorSeed: title, colorRole: 'child' as const },
-          })),
-        ]);
-
         if (epoch !== mutationEpochRef.current) return;
         if (updateQueueRef.current) updateQueueRef.current.queueUpdate(nodesToAdd, linksToAdd);
         if (newAutoDiscovered.size > 0) setAutoDiscoveredNodes(prev => new Set([...prev, ...newAutoDiscovered]));
@@ -773,6 +791,10 @@ const WikiWebExplorer = () => {
     expandNode(d.id);
   };
 
+  useEffect(() => {
+    graphManagerRef.current?.setPathHighlight(pathNodes.size > 0 ? pathNodes : null);
+  }, [pathNodes]);
+
   return (
     <div className="w-screen h-screen bg-gray-900 text-white relative overflow-hidden font-sans">
       <div className="absolute inset-0 z-0">
@@ -808,6 +830,7 @@ const WikiWebExplorer = () => {
         }}
         onAddTopic={addTopicFromSearchUI}
         onRunSuggestedPath={runSuggestedPath}
+        onAutoTest={() => runSuggestedPath('Facebook', 'First Amendment')}
       />
 
       {/* Floating Controls */}
@@ -816,13 +839,16 @@ const WikiWebExplorer = () => {
         setShowSettings={setShowSettings}
         nodeSpacing={nodeSpacing}
         setNodeSpacing={setNodeSpacing}
-        searchDepth={searchDepth}
-        setSearchDepth={setSearchDepth}
+        recursionDepth={recursionDepth}
+        setRecursionDepth={setRecursionDepth}
         nodeSizeScale={nodeSizeScale}
         setNodeSizeScale={setNodeSizeScale}
         apiContactEmail={apiContactEmail}
         setApiContactEmail={setApiContactEmail}
-        onPrune={pruneGraph}
+        nodeCount={nodeCount}
+        linkCount={linkCount}
+        onPruneLeaves={pruneLeafNodes}
+        onDeleteSelection={pruneGraph}
       />
 
       {/* Search Terminal Overlays */}
@@ -867,6 +893,22 @@ const WikiWebExplorer = () => {
         }
       />
 
+      {/* Trash Zone */}
+      <div className="absolute bottom-4 right-4 z-10 pointer-events-none">
+        <div
+          className={`w-[140px] h-[140px] rounded-2xl border-2 border-dashed flex items-center justify-center text-center text-xs font-semibold transition-all ${trashState.isDragging
+            ? trashState.isOverTrash
+              ? 'border-red-400 bg-red-500/15 text-red-200 shadow-[0_0_30px_rgba(239,68,68,0.25)]'
+              : 'border-gray-600 bg-black/10 text-gray-300'
+            : 'border-gray-700/60 bg-black/5 text-gray-500'
+            }`}
+        >
+          {trashState.isDragging ? (trashState.isOverTrash ? 'Release\nto Delete' : 'Drag Here\nto Delete') : 'Trash'}
+        </div>
+      </div>
+
+      {/* Connection Analytics */}
+      <LogPanel />
     </div>
   );
 };

@@ -42,7 +42,7 @@ const LogPanel = () => {
         return (
             <button
                 onClick={() => setIsOpen(true)}
-                className="fixed bottom-4 right-4 bg-gray-800 text-blue-400 border border-blue-500 rounded-full p-3 shadow-lg hover:bg-gray-700 transition z-50"
+                className="absolute bottom-6 right-44 bg-gray-800/80 backdrop-blur-md text-blue-300 border border-blue-500/60 rounded-full p-3 shadow-xl hover:bg-gray-700 transition z-50"
                 title="View Connection Logs"
             >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -53,7 +53,7 @@ const LogPanel = () => {
     }
 
     return (
-        <div className="fixed bottom-4 right-4 w-96 bg-gray-900 border border-gray-700 rounded-lg shadow-2xl z-50 flex flex-col max-h-[500px]">
+        <div className="absolute bottom-6 right-44 w-96 bg-gray-900/95 backdrop-blur-md border border-gray-700 rounded-lg shadow-2xl z-50 flex flex-col max-h-[520px]">
             <div className="flex items-center justify-between p-3 border-b border-gray-700 bg-gray-800 rounded-t-lg">
                 <h3 className="font-bold text-gray-200">Connection Logs ({logs.length})</h3>
                 <div className="flex gap-2">
