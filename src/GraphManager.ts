@@ -637,9 +637,13 @@ export class GraphManager {
     const longPressStarts = new WeakMap<SVGLineElement, { x: number; y: number }>();
     const longPressTriggered = new WeakMap<SVGLineElement, boolean>();
 
-    const highlightLink = (el: d3.Selection<SVGLineElement, any, any, any>) => {
-      el.attr('stroke', '#00ffff')
-        .attr('stroke-width', 6)
+    const highlightLink = (el: d3.Selection<SVGLineElement, any, any, any>, d: Link) => {
+      const style = this.getLinkStyle(d);
+      const strokeValue = style.useGradient && style.gradientId
+        ? `url(#${style.gradientId})`
+        : '#00ffff';
+      el.attr('stroke', strokeValue)
+        .attr('stroke-width', Math.max(style.strokeWidth + 2, 6))
         .attr('stroke-opacity', 1);
     };
 
@@ -696,22 +700,22 @@ export class GraphManager {
           this.callbacks.onLinkClick(d, event);
         }
       })
-      .on('mouseover', (event) => {
-        highlightLink(d3.select(event.currentTarget as SVGLineElement));
+      .on('mouseover', (event, d) => {
+        highlightLink(d3.select(event.currentTarget as SVGLineElement), d);
       })
       .on('mouseout', (event, d) => {
         // Re-apply original styles based on metadata
         const el = d3.select(event.currentTarget);
         resetLink(el as any, d);
       })
-      .on('pointerdown', (event) => {
+      .on('pointerdown', (event, d) => {
         if (event.pointerType !== 'touch') return;
         const el = event.currentTarget as SVGLineElement;
         longPressStarts.set(el, { x: event.clientX, y: event.clientY });
         longPressTriggered.set(el, false);
         const timer = window.setTimeout(() => {
           longPressTriggered.set(el, true);
-          highlightLink(d3.select(el));
+          highlightLink(d3.select(el), d);
         }, 280);
         longPressTimers.set(el, timer);
       })
@@ -766,6 +770,8 @@ export class GraphManager {
     const targetId = typeof d.target === 'object' ? d.target.id : d.target as string;
     const sourceMeta = this.nodeMetadata.get(sourceId);
     const targetMeta = this.nodeMetadata.get(targetId);
+    const isPathLink = Boolean(sourceMeta?.isInPath && targetMeta?.isInPath);
+    const gradientId = isPathLink ? this.getGradientId(sourceId, targetId) : undefined;
 
     const isDimmed =
       Boolean(sourceMeta?.isDimmed || sourceMeta?.isDimmedByPath) ||
@@ -788,15 +794,75 @@ export class GraphManager {
       return 0.6;
     })();
 
-    return { stroke, strokeWidth, strokeOpacity };
+    return {
+      stroke,
+      strokeWidth,
+      strokeOpacity,
+      useGradient: isPathLink,
+      gradientId,
+    };
   }
 
   private applyLinkStyles(selection: d3.Selection<any, Link, any, any>, d: Link) {
     const style = this.getLinkStyle(d);
+    const strokeValue = style.gradientId ? `url(#${style.gradientId})` : style.stroke;
     selection
-      .attr('stroke', style.stroke)
+      .attr('stroke', strokeValue)
       .attr('stroke-width', style.strokeWidth)
       .attr('stroke-opacity', style.strokeOpacity);
+  }
+
+  private isPathLink(d: Link) {
+    const sourceId = typeof d.source === 'object' ? d.source.id : d.source as string;
+    const targetId = typeof d.target === 'object' ? d.target.id : d.target as string;
+    const sourceMeta = this.nodeMetadata.get(sourceId);
+    const targetMeta = this.nodeMetadata.get(targetId);
+    return Boolean(sourceMeta?.isInPath && targetMeta?.isInPath);
+  }
+
+  private getGradientId(sourceId: string, targetId: string) {
+    return `link-grad-${this.sanitizeId(sourceId)}-${this.sanitizeId(targetId)}`;
+  }
+
+  private updateLinkGradients() {
+    const gradientLinks = this.links.filter(l => this.isPathLink(l));
+
+    const gradients = this.defs.selectAll<SVGLinearGradientElement, Link>('linearGradient.link-gradient')
+      .data(gradientLinks, (d: any) => {
+        const sourceId = typeof d.source === 'object' ? d.source.id : d.source as string;
+        const targetId = typeof d.target === 'object' ? d.target.id : d.target as string;
+        return this.getGradientId(sourceId, targetId);
+      });
+
+    const enter = gradients.enter()
+      .append('linearGradient')
+      .attr('class', 'link-gradient')
+      .attr('gradientUnits', 'userSpaceOnUse');
+
+    enter.append('stop')
+      .attr('offset', '0%')
+      .attr('stop-color', '#22d3ee')
+      .attr('stop-opacity', 0.9);
+
+    enter.append('stop')
+      .attr('offset', '100%')
+      .attr('stop-color', '#a855f7')
+      .attr('stop-opacity', 0.9);
+
+    const merged = enter.merge(gradients as any);
+
+    merged
+      .attr('id', (d: any) => {
+        const sourceId = typeof d.source === 'object' ? d.source.id : d.source as string;
+        const targetId = typeof d.target === 'object' ? d.target.id : d.target as string;
+        return this.getGradientId(sourceId, targetId);
+      })
+      .attr('x1', (d: any) => (typeof d.source === 'object' ? d.source.x : 0) ?? 0)
+      .attr('y1', (d: any) => (typeof d.source === 'object' ? d.source.y : 0) ?? 0)
+      .attr('x2', (d: any) => (typeof d.target === 'object' ? d.target.x : 0) ?? 0)
+      .attr('y2', (d: any) => (typeof d.target === 'object' ? d.target.y : 0) ?? 0);
+
+    gradients.exit().remove();
   }
 
   /**
@@ -1051,6 +1117,9 @@ export class GraphManager {
       .attr('y1', (d: any) => d.source.y)
       .attr('x2', (d: any) => d.target.x)
       .attr('y2', (d: any) => d.target.y);
+
+    // Keep gradients aligned with current link positions
+    this.updateLinkGradients();
 
     // Update node positions
     this.nodesGroup.selectAll('g.node')
