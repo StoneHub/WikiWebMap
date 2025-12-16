@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 interface GraphControlsProps {
     showSettings: boolean;
@@ -9,6 +9,8 @@ interface GraphControlsProps {
     setRecursionDepth: (depth: number) => void;
     nodeSizeScale: number;
     setNodeSizeScale: (scale: number) => void;
+    includeBacklinks: boolean;
+    setIncludeBacklinks: (value: boolean) => void;
     apiContactEmail: string;
     setApiContactEmail: (email: string) => void;
     nodeCount: number;
@@ -26,6 +28,8 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
     setRecursionDepth,
     nodeSizeScale,
     setNodeSizeScale,
+    includeBacklinks,
+    setIncludeBacklinks,
     apiContactEmail,
     setApiContactEmail,
     nodeCount,
@@ -33,9 +37,11 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
     onPruneLeaves,
     onDeleteSelection,
 }) => {
+    const [showLegend, setShowLegend] = useState(false);
+
     return (
         <div className="fixed bottom-20 left-3 sm:bottom-8 sm:left-6 z-20 flex flex-col items-start gap-2 sm:gap-3 pointer-events-none">
-            <div className="pointer-events-auto">
+            <div className="pointer-events-auto flex gap-2">
                 <button
                     onClick={() => setShowSettings(!showSettings)}
                     className="w-12 h-12 bg-gray-800/80 backdrop-blur-md border border-gray-600/50 rounded-full shadow-xl flex items-center justify-center hover:bg-gray-700 text-gray-300 transition-all hover:scale-105"
@@ -50,7 +56,60 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                         ></path>
                     </svg>
                 </button>
+
+                <button
+                    onClick={() => setShowLegend(v => !v)}
+                    className="w-12 h-12 bg-gray-800/80 backdrop-blur-md border border-gray-600/50 rounded-full shadow-xl flex items-center justify-center hover:bg-gray-700 text-gray-300 transition-all hover:scale-105"
+                    title="Legend"
+                    aria-label="Legend"
+                >
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth="2"
+                            d="M13 16h-1v-4h-1m1-4h.01M12 22a10 10 0 110-20 10 10 0 010 20z"
+                        />
+                    </svg>
+                </button>
             </div>
+
+            {showLegend && (
+                <div className="bg-gray-800/90 backdrop-blur-md border border-gray-700/50 rounded-2xl p-4 shadow-2xl w-64 max-w-[calc(100vw-2rem)] animate-fade-in-up pointer-events-auto">
+                    <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">
+                        Legend
+                    </h3>
+                    <div className="space-y-2 text-xs text-gray-200">
+                        <div className="flex items-center justify-between">
+                            <span className="text-gray-300">Outgoing links</span>
+                            <svg width="84" height="12" className="opacity-90">
+                                <line x1="2" y1="6" x2="82" y2="6" stroke="#a3a3a3" strokeWidth="3" />
+                            </svg>
+                        </div>
+                        <div className="flex items-center justify-between">
+                            <span className="text-gray-300">Incoming links</span>
+                            <svg width="84" height="12" className="opacity-90">
+                                <line x1="2" y1="6" x2="82" y2="6" stroke="#ffb020" strokeWidth="3" strokeDasharray="6 10" />
+                            </svg>
+                        </div>
+                        <div className="flex items-center justify-between">
+                            <span className="text-gray-300">Path result</span>
+                            <svg width="84" height="12" className="opacity-90">
+                                <defs>
+                                    <linearGradient id="legend-grad" x1="0" y1="0" x2="1" y2="0">
+                                        <stop offset="0%" stopColor="#22d3ee" stopOpacity="0.95" />
+                                        <stop offset="100%" stopColor="#a855f7" stopOpacity="0.95" />
+                                    </linearGradient>
+                                </defs>
+                                <line x1="2" y1="6" x2="82" y2="6" stroke="url(#legend-grad)" strokeWidth="4" />
+                            </svg>
+                        </div>
+                    </div>
+                    <div className="mt-3 pt-3 border-t border-gray-700/50 text-[11px] text-gray-300 leading-relaxed">
+                        Incoming links are other articles that link to this topic. Click a node to spotlight its neighbors; click empty space to clear.
+                    </div>
+                </div>
+            )}
 
             {/* Settings Bubble */}
             {showSettings && (
@@ -112,6 +171,22 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                                 onChange={(e) => setNodeSizeScale(Number(e.target.value))}
                                 className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
                             />
+                        </div>
+                        <div>
+                            <div className="flex justify-between text-xs text-gray-400 mb-1">
+                                <span>Discovery</span>
+                            </div>
+                            <label className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer select-none">
+                                <input
+                                    type="checkbox"
+                                    checked={includeBacklinks}
+                                    onChange={(e) => setIncludeBacklinks(e.target.checked)}
+                                />
+                                Include incoming links (what links here)
+                            </label>
+                            <div className="mt-1 text-[10px] text-gray-500">
+                                Adds connections from other pages that link to this topic.
+                            </div>
                         </div>
                         <div>
                             <div className="flex justify-between text-xs text-gray-400 mb-1">

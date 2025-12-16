@@ -131,6 +131,7 @@ const LogPanel = ({ isOpen, onClose }: LogPanelProps) => {
                                 <td className="p-2">
                                     <span className={`px-1 rounded ${log.type === 'manual' ? 'bg-blue-900 text-blue-300' :
                                         log.type === 'path' ? 'bg-purple-900 text-purple-300' :
+                                        log.type.includes('backlink') ? 'bg-orange-900 text-orange-300' :
                                             'bg-gray-700 text-gray-300'
                                         }`}>
                                         {log.type}

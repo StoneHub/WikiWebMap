@@ -4,6 +4,9 @@ import { Node as GraphNode } from '../GraphManager';
 interface NodeDetailsPanelProps {
     clickedNode: GraphNode | null;
     clickedSummary: string;
+    clickedDescription?: string;
+    clickedCategories?: string[];
+    clickedBacklinkCount?: number;
     nodeThumbnails: Record<string, string>;
     onClose: () => void;
     onExpand: (id: string) => void;
@@ -14,6 +17,9 @@ interface NodeDetailsPanelProps {
 export const NodeDetailsPanel: React.FC<NodeDetailsPanelProps> = ({
     clickedNode,
     clickedSummary,
+    clickedDescription,
+    clickedCategories,
+    clickedBacklinkCount,
     nodeThumbnails,
     onClose,
     onExpand,
@@ -63,9 +69,39 @@ export const NodeDetailsPanel: React.FC<NodeDetailsPanelProps> = ({
                     <h2 className="text-xl font-bold text-white mb-2 leading-tight">
                         {clickedNode.title}
                     </h2>
+                    {(clickedDescription || typeof clickedBacklinkCount === 'number') && (
+                        <div className="mb-3 flex flex-wrap gap-2 text-[11px] text-gray-300">
+                            {clickedDescription && (
+                                <span className="px-2 py-1 rounded-full bg-gray-700/50 border border-gray-600/40">
+                                    {clickedDescription}
+                                </span>
+                            )}
+                            {typeof clickedBacklinkCount === 'number' && (
+                                <span className="px-2 py-1 rounded-full bg-orange-900/30 border border-orange-700/40 text-orange-200">
+                                    Backlinks: {clickedBacklinkCount}
+                                </span>
+                            )}
+                        </div>
+                    )}
                     <p className="text-sm text-gray-300 mb-4 leading-relaxed max-h-40 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-transparent pr-2">
                         {clickedSummary || 'Loading summary...'}
                     </p>
+                    {clickedCategories && clickedCategories.length > 0 && (
+                        <div className="mb-4">
+                            <div className="text-[10px] uppercase tracking-widest text-gray-500 mb-1">Categories</div>
+                            <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-transparent pr-1">
+                                {clickedCategories.slice(0, 18).map(cat => (
+                                    <span
+                                        key={cat}
+                                        className="text-[11px] px-2 py-1 rounded-full bg-black/20 border border-gray-700/60 text-gray-200"
+                                        title={cat}
+                                    >
+                                        {cat}
+                                    </span>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                     <div className="grid grid-cols-2 gap-2">
                         <button
                             onClick={() =>

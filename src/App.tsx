@@ -35,6 +35,9 @@ const WikiWebExplorer = () => {
   const [recentlyAddedNodes] = useState(new Set<string>());
   const [expandedNodes, setExpandedNodes] = useState(new Set<string>());
   const [nodeThumbnails, setNodeThumbnails] = useState<Record<string, string>>({});
+  const [nodeDescriptions, setNodeDescriptions] = useState<Record<string, string>>({});
+  const [nodeCategories, setNodeCategories] = useState<Record<string, string[]>>({});
+  const [nodeBacklinkCounts, setNodeBacklinkCounts] = useState<Record<string, number>>({});
   const [featuredPaths, setFeaturedPaths] = useState<SuggestedPath[]>([]);
   const [showFeaturedPaths, setShowFeaturedPaths] = useState(true);
 
@@ -66,7 +69,11 @@ const WikiWebExplorer = () => {
   const [logPanelOpen, setLogPanelOpen] = useState(false);
 
   // Settings Visibility
-  const [showSettings, setShowSettings] = useState(true);
+  const [showSettings, setShowSettings] = useState(false);
+  const [includeBacklinks, setIncludeBacklinks] = useState(() => {
+    const raw = localStorage.getItem('wikiIncludeBacklinks');
+    return raw === null ? true : raw === 'true';
+  });
   const [apiContactEmail, setApiContactEmail] = useState(() => {
     const fromStorage = localStorage.getItem('wikiApiContactEmail') || '';
     const fromEnv = (import.meta.env.VITE_WIKI_API_CONTACT_EMAIL as string | undefined) || '';
@@ -252,6 +259,10 @@ const WikiWebExplorer = () => {
       onNodeClick: (node, event) => handleNodeClick(event as any, node),
       onNodeDoubleClick: (node, event) => handleNodeDoubleClick(event as any, node),
       onLinkClick: (link, event) => handleLinkClick(event as any, link),
+      onBackgroundClick: () => {
+        graphManagerRef.current?.highlightNode(null);
+        setClickedNode(null);
+      },
       onSelectionChange: (nodes) => setBulkSelectedNodes(nodes),
       onLinksApplied: ({ added, updated }) => {
         const normalize = (l: Link) => {
@@ -364,6 +375,10 @@ const WikiWebExplorer = () => {
     WikiService.setApiUserAgent(trimmed ? `WikiWebMap (${trimmed})` : undefined);
   }, [apiContactEmail]);
 
+  useEffect(() => {
+    localStorage.setItem('wikiIncludeBacklinks', includeBacklinks ? 'true' : 'false');
+  }, [includeBacklinks]);
+
   // Sync node metadata
   useEffect(() => {
     if (!graphManagerRef.current) return;
@@ -458,14 +473,28 @@ const WikiWebExplorer = () => {
 
     try {
       const resolvedTitle = await WikiService.resolveTitle(title);
-      const links = await WikiService.fetchLinks(resolvedTitle);
-      const summaryData = await WikiService.fetchSummary(resolvedTitle);
+      const [links, summaryData, categories, backlinks] = await Promise.all([
+        WikiService.fetchLinks(resolvedTitle),
+        WikiService.fetchSummary(resolvedTitle),
+        WikiService.fetchCategories(resolvedTitle).catch(() => []),
+        includeBacklinks ? WikiService.fetchBacklinks(resolvedTitle, 25) : Promise.resolve([]),
+      ]);
 
       if (epoch !== mutationEpochRef.current) return resolvedTitle;
       pushHistory();
 
       if (summaryData.thumbnail) {
         setNodeThumbnails(prev => ({ ...prev, [resolvedTitle]: summaryData.thumbnail! }));
+      }
+      if (summaryData.description) {
+        setNodeDescriptions(prev => ({ ...prev, [resolvedTitle]: summaryData.description! }));
+        graphManagerRef.current?.setNodeMetadata(resolvedTitle, { colorSeed: summaryData.description });
+      }
+      if (categories.length > 0) {
+        setNodeCategories(prev => ({ ...prev, [resolvedTitle]: categories }));
+      }
+      if (includeBacklinks) {
+        setNodeBacklinkCounts(prev => ({ ...prev, [resolvedTitle]: backlinks.length }));
       }
 
       setUserTypedNodes(prev => new Set([...prev, resolvedTitle]));
@@ -483,6 +512,18 @@ const WikiWebExplorer = () => {
           id: `${resolvedTitle}-${linkObj.title}`,
           type: 'manual',
           context: linkObj.context
+        });
+      });
+
+      backlinks.forEach((blTitle: string) => {
+        if (!blTitle || blTitle === resolvedTitle) return;
+        newNodes.push({ id: blTitle, title: blTitle });
+        newAutoDiscovered.add(blTitle);
+        newLinks.push({
+          source: blTitle,
+          target: resolvedTitle,
+          id: `${blTitle}-${resolvedTitle}`,
+          type: 'backlink',
         });
       });
 
@@ -753,47 +794,117 @@ const WikiWebExplorer = () => {
     const epoch = mutationEpochRef.current;
 
     try {
-      const linksWithContext = await WikiService.fetchLinks(title);
+      const [linksWithContext, backlinks, categories] = await Promise.all([
+        WikiService.fetchLinks(title),
+        includeBacklinks ? WikiService.fetchBacklinks(title, 30) : Promise.resolve([]),
+        WikiService.fetchCategories(title).catch(() => []),
+      ]);
 
       if (epoch !== mutationEpochRef.current) return;
       pushHistory();
 
       const gm = graphManagerRef.current;
       const existingGraphNodeIds = new Set(gm?.getNodeIds() || []);
-      const scores: Record<string, number> = {};
+
+      if (categories.length > 0) setNodeCategories(prev => ({ ...prev, [title]: categories }));
+      if (includeBacklinks) setNodeBacklinkCounts(prev => ({ ...prev, [title]: backlinks.length }));
+
+      const boldSet = new Set(WikiService.getBoldLinkTitlesFromCache(title) || []);
+      const backlinkSet = new Set(backlinks);
+      const outSet = new Set(linksWithContext.map(l => l.title));
+
+      const sourceCategories = categories.length > 0 ? categories : (nodeCategories[title] || []);
+      const sharedCategoryCount = (candidateTitle: string) => {
+        const candidateCategories = nodeCategories[candidateTitle];
+        if (!candidateCategories || candidateCategories.length === 0) return 0;
+        if (!sourceCategories || sourceCategories.length === 0) return 0;
+        const set = new Set(candidateCategories);
+        let count = 0;
+        for (const c of sourceCategories) {
+          if (set.has(c)) count++;
+        }
+        return count;
+      };
+
+      type Candidate = { title: string; direction: 'out' | 'in'; context?: string; isBold: boolean; isBidirectional: boolean; sharedCats: number };
+      const candidates: Candidate[] = [];
 
       linksWithContext.forEach(linkObj => {
-        const candidate = linkObj.title;
-        const inGraph = existingGraphNodeIds.has(candidate);
-        const degree = inGraph ? (gm?.getNodeDegree(candidate) || 0) : 0;
-        scores[candidate] = (inGraph ? 50 : 0) + degree * 10;
+        const candidateTitle = linkObj.title;
+        if (!candidateTitle || candidateTitle === title) return;
+        candidates.push({
+          title: candidateTitle,
+          direction: 'out',
+          context: linkObj.context,
+          isBold: boldSet.has(candidateTitle),
+          isBidirectional: backlinkSet.has(candidateTitle),
+          sharedCats: sharedCategoryCount(candidateTitle),
+        });
       });
 
-      const sortedCandidates = linksWithContext.sort((a, b) => (scores[b.title] || 0) - (scores[a.title] || 0)).slice(0, 15);
+      backlinks.forEach((blTitle: string) => {
+        if (!blTitle || blTitle === title) return;
+        if (outSet.has(blTitle)) return; // bidirectional already represented via outgoing link
+        candidates.push({
+          title: blTitle,
+          direction: 'in',
+          context: undefined,
+          isBold: false,
+          isBidirectional: false,
+          sharedCats: sharedCategoryCount(blTitle),
+        });
+      });
+
+      const scoreOf = (c: Candidate) => {
+        const inGraph = existingGraphNodeIds.has(c.title);
+        const degree = inGraph ? (gm?.getNodeDegree(c.title) || 0) : 0;
+        return (
+          degree * 10 +
+          (inGraph ? 20 : 10) +
+          (c.direction === 'in' ? 15 : 0) +
+          (c.isBidirectional ? 35 : 0) +
+          (c.isBold ? 12 : 0) +
+          (c.sharedCats * 15)
+        );
+      };
+
+      const sortedCandidates = candidates
+        .sort((a, b) => scoreOf(b) - scoreOf(a))
+        .slice(0, 15);
       const nodesToAdd: GraphNode[] = [];
       const linksToAdd: Link[] = [];
       const newAutoDiscovered = new Set<string>();
 
-      sortedCandidates.forEach(linkObj => {
-        const link = linkObj.title;
-        nodesToAdd.push({ id: link, title: link });
-        newAutoDiscovered.add(link);
-        linksToAdd.push({
-          source: title,
-          target: link,
-          id: `${title}-${link}`,
-          type: 'expand',
-          context: linkObj.context
-        });
+      sortedCandidates.forEach(c => {
+        const candidateTitle = c.title;
+        nodesToAdd.push({ id: candidateTitle, title: candidateTitle });
+        newAutoDiscovered.add(candidateTitle);
+
+        if (c.direction === 'out') {
+          linksToAdd.push({
+            source: title,
+            target: candidateTitle,
+            id: `${title}-${candidateTitle}`,
+            type: c.isBidirectional ? 'expand_backlink' : 'expand',
+            context: c.context
+          });
+        } else {
+          linksToAdd.push({
+            source: candidateTitle,
+            target: title,
+            id: `${candidateTitle}-${title}`,
+            type: 'expand_backlink',
+          });
+        }
 
         existingGraphNodeIds.forEach(existing => {
           if (existing === title) return;
           const existingLinks = WikiService.getLinksFromCache(existing);
-          const match = existingLinks?.find(l => l.title === link);
+          const match = existingLinks?.find(l => l.title === candidateTitle);
           if (match) linksToAdd.push({
             source: existing,
-            target: link,
-            id: `${existing}-${link}`,
+            target: candidateTitle,
+            id: `${existing}-${candidateTitle}`,
             type: 'auto',
             context: match.context
           });
@@ -867,10 +978,21 @@ const WikiWebExplorer = () => {
     if (graphManagerRef.current) graphManagerRef.current.highlightNode(d.id);
 
     setClickedNode(d);
-    const result = await WikiService.fetchSummary(d.title);
+    setClickedSummary('');
+    const [result, categories, backlinks] = await Promise.all([
+      WikiService.fetchSummary(d.title),
+      WikiService.fetchCategories(d.title).catch(() => []),
+      includeBacklinks ? WikiService.fetchBacklinks(d.title, 30) : Promise.resolve([]),
+    ]);
+
     setClickedSummary(result.summary);
-    // setClickedThumbnail(result.thumbnail || '');
     if (result.thumbnail) setNodeThumbnails(prev => ({ ...prev, [d.title]: result.thumbnail! }));
+    if (result.description) {
+      setNodeDescriptions(prev => ({ ...prev, [d.title]: result.description! }));
+      graphManagerRef.current?.setNodeMetadata(d.id, { colorSeed: result.description });
+    }
+    if (categories.length > 0) setNodeCategories(prev => ({ ...prev, [d.title]: categories }));
+    if (includeBacklinks) setNodeBacklinkCounts(prev => ({ ...prev, [d.title]: backlinks.length }));
   };
 
   const handleLinkClick = (event: any, d: Link) => {
@@ -879,6 +1001,30 @@ const WikiWebExplorer = () => {
     // Toggle link context
     if (!d.id) return; // Should have ID now
     const isOn = activeLinkContexts.has(d.id);
+
+    if (!isOn && !d.context && graphManagerRef.current) {
+      const source = typeof d.source === 'object' ? d.source.id : d.source;
+      const target = typeof d.target === 'object' ? d.target.id : d.target;
+      const linkId = d.id;
+      const linkType = d.type;
+
+      // Lazy-fetch missing snippet context (especially useful for incoming links + path hops).
+      void WikiService.fetchLinkContext(source, target).then((context) => {
+        const nextContext = context || (() => {
+          if (typeof linkType === 'string' && linkType.includes('backlink')) {
+            return `Snippet unavailable. Connection confirmed because “${source}” contains a link to “${target}”.`;
+          }
+          return `Snippet unavailable. Connection confirmed because “${source}” contains a link to “${target}”.`;
+        })();
+        graphManagerRef.current?.addLinks([{
+          source,
+          target,
+          id: linkId,
+          type: linkType,
+          context: nextContext,
+        }]);
+      });
+    }
 
     setActiveLinkContexts(prev => {
       const next = new Set(prev);
@@ -937,6 +1083,8 @@ const WikiWebExplorer = () => {
         setRecursionDepth={setRecursionDepth}
         nodeSizeScale={nodeSizeScale}
         setNodeSizeScale={setNodeSizeScale}
+        includeBacklinks={includeBacklinks}
+        setIncludeBacklinks={setIncludeBacklinks}
         apiContactEmail={apiContactEmail}
         setApiContactEmail={setApiContactEmail}
         nodeCount={nodeCount}
@@ -972,6 +1120,9 @@ const WikiWebExplorer = () => {
       <NodeDetailsPanel
         clickedNode={clickedNode}
         clickedSummary={clickedSummary}
+        clickedDescription={clickedNode ? nodeDescriptions[clickedNode.title] : undefined}
+        clickedCategories={clickedNode ? nodeCategories[clickedNode.title] : undefined}
+        clickedBacklinkCount={clickedNode ? nodeBacklinkCounts[clickedNode.title] : undefined}
         nodeThumbnails={nodeThumbnails}
         onClose={() => setClickedNode(null)}
         onExpand={expandNode}

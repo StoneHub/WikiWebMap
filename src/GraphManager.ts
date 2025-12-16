@@ -30,6 +30,7 @@ export interface GraphCallbacks {
   onNodeDoubleClick?: (node: Node, event: MouseEvent) => void;
   onNodeDragStart?: (node: Node) => void;
   onLinkClick?: (link: Link, event: MouseEvent) => void;
+  onBackgroundClick?: (event: MouseEvent) => void;
   onLinksApplied?: (args: { added: Link[]; updated: Link[] }) => void;
   onStatsUpdate?: (stats: { nodeCount: number; linkCount: number }) => void;
   onSelectionChange?: (selectedNodes: Node[]) => void;
@@ -47,6 +48,8 @@ export interface NodeMetadata {
   isBulkSelected: boolean;
   isDimmed: boolean;
   isDimmedByPath: boolean;
+  isFocusTarget?: boolean;
+  isFocusNeighbor?: boolean;
   thumbnail?: string;
   colorSeed?: string;
   colorRole?: 'root' | 'child';
@@ -70,6 +73,8 @@ export class GraphManager {
 
   // Metadata maps for node styling
   private nodeMetadata: Map<string, NodeMetadata> = new Map();
+  private focusNodeId: string | null = null;
+  private focusNeighborIds: Set<string> = new Set();
 
   private callbacks: GraphCallbacks = {};
   private width: number;
@@ -134,6 +139,61 @@ export class GraphManager {
 
     // Create defs for image patterns
     this.defs = this.svg.append('defs');
+
+    this.initializeFilters();
+
+    this.svg.on('click.background', (event: any) => {
+      // Only treat clicks on empty canvas as background clicks (not nodes/links/groups).
+      const target = event?.target as Element | null;
+      const tag = target?.tagName?.toLowerCase();
+      if (tag === 'svg') {
+        this.callbacks.onBackgroundClick?.(event as MouseEvent);
+      }
+    });
+  }
+
+  private initializeFilters() {
+    this.defs.selectAll('filter.focus-glow').remove();
+
+    const focus = this.defs.append('filter')
+      .attr('class', 'focus-glow')
+      .attr('id', 'focus-glow')
+      .attr('x', '-50%')
+      .attr('y', '-50%')
+      .attr('width', '200%')
+      .attr('height', '200%');
+
+    focus.append('feGaussianBlur')
+      .attr('in', 'SourceGraphic')
+      .attr('stdDeviation', 3)
+      .attr('result', 'blur');
+
+    focus.append('feColorMatrix')
+      .attr('in', 'blur')
+      .attr('type', 'matrix')
+      .attr('values', '1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 0.85 0')
+      .attr('result', 'glow');
+
+    const merge = focus.append('feMerge');
+    merge.append('feMergeNode').attr('in', 'glow');
+    merge.append('feMergeNode').attr('in', 'SourceGraphic');
+
+    const neighbor = this.defs.append('filter')
+      .attr('class', 'focus-glow')
+      .attr('id', 'neighbor-glow')
+      .attr('x', '-50%')
+      .attr('y', '-50%')
+      .attr('width', '200%')
+      .attr('height', '200%');
+
+    neighbor.append('feGaussianBlur')
+      .attr('in', 'SourceGraphic')
+      .attr('stdDeviation', 2)
+      .attr('result', 'blur');
+
+    const nMerge = neighbor.append('feMerge');
+    nMerge.append('feMergeNode').attr('in', 'blur');
+    nMerge.append('feMergeNode').attr('in', 'SourceGraphic');
   }
 
   private initializeSimulation() {
@@ -185,7 +245,9 @@ export class GraphManager {
             colorSeed: undefined,
             colorRole: undefined,
             isDimmed: false, // Focus dimming
-            isDimmedByPath: false // Path dimming
+            isDimmedByPath: false, // Path dimming
+            isFocusTarget: false,
+            isFocusNeighbor: false
           });
         }
       }
@@ -333,7 +395,9 @@ export class GraphManager {
       colorSeed: undefined,
       colorRole: undefined,
       isDimmed: false,
-      isDimmedByPath: false
+      isDimmedByPath: false,
+      isFocusTarget: false,
+      isFocusNeighbor: false
     };
 
     const newMeta = { ...existing, ...metadata };
@@ -438,7 +502,9 @@ export class GraphManager {
         colorSeed: undefined,
         colorRole: undefined,
         isDimmed: false,
-        isDimmedByPath: false
+        isDimmedByPath: false,
+        isFocusTarget: false,
+        isFocusNeighbor: false
       };
 
       this.nodeMetadata.set(nodeId, { ...existing, ...metadata });
@@ -451,9 +517,16 @@ export class GraphManager {
    * Highlight a node and its direct connections
    */
   highlightNode(targetNodeId: string | null) {
+    this.focusNodeId = targetNodeId;
+    this.focusNeighborIds = new Set();
+
     if (targetNodeId === null) {
       // Reset all dimming
-      this.nodeMetadata.forEach(meta => meta.isDimmed = false);
+      this.nodeMetadata.forEach(meta => {
+        meta.isDimmed = false;
+        meta.isFocusTarget = false;
+        meta.isFocusNeighbor = false;
+      });
     } else {
       // Find neighbors
       const neighbors = new Set<string>();
@@ -463,12 +536,15 @@ export class GraphManager {
         if (sourceId === targetNodeId) neighbors.add(targetId);
         if (targetId === targetNodeId) neighbors.add(sourceId);
       });
+      this.focusNeighborIds = neighbors;
 
       // Apply dimming
       this.nodes.forEach(n => {
         const meta = this.nodeMetadata.get(n.id);
         if (meta) {
           meta.isDimmed = n.id !== targetNodeId && !neighbors.has(n.id);
+          meta.isFocusTarget = n.id === targetNodeId;
+          meta.isFocusNeighbor = neighbors.has(n.id);
         }
       });
     }
@@ -522,6 +598,8 @@ export class GraphManager {
     this.nodes = [];
     this.links = [];
     this.nodeMetadata.clear();
+    this.focusNodeId = null;
+    this.focusNeighborIds = new Set();
 
     this.simulation.nodes(this.nodes);
     (this.simulation.force('link') as d3.ForceLink<Node, Link>).links(this.links);
@@ -659,41 +737,61 @@ export class GraphManager {
       }
       const wasTriggered = longPressTriggered.get(el);
       if (shouldReset && wasTriggered) {
-        resetLink(d3.select(el), d);
+        const group = d3.select(el.parentNode as SVGGElement);
+        resetLink(group.select('line.visible') as any, d);
       }
       longPressTriggered.delete(el);
       longPressStarts.delete(el);
     };
 
-    const linkElements = this.linksGroup
-      .selectAll('line')
+    const linkGroups = this.linksGroup
+      .selectAll<SVGGElement, Link>('g.link')
       .data(this.links, (d: any) => {
         const sourceId = typeof d.source === 'object' ? d.source.id : d.source;
         const targetId = typeof d.target === 'object' ? d.target.id : d.target;
         return `${sourceId}-${targetId}`;
       });
 
-    const enter = linkElements.enter()
-      .append('line')
+    const enter = linkGroups.enter()
+      .append('g')
+      .attr('class', 'link');
+
+    // Invisible hit area (bigger click target)
+    enter.append('line')
+      .attr('class', 'hit')
+      .attr('stroke', '#000')
+      .attr('stroke-opacity', 0)
+      .attr('stroke-linecap', 'round')
+      .style('pointer-events', 'stroke')
+      .style('cursor', 'pointer');
+
+    // Visible stroke
+    enter.append('line')
+      .attr('class', 'visible')
       .attr('stroke', '#444')
       .attr('stroke-width', 0)
       .attr('stroke-opacity', 0)
-      .attr('stroke-dasharray', '8 12')
-      .attr('stroke-dashoffset', 60)
-      .style('cursor', 'pointer'); // Link clickability
+      .style('pointer-events', 'none');
 
-    const merged = enter.merge(linkElements as any);
+    const merged = enter.merge(linkGroups as any);
 
-    // Initial style application
+    const hit = merged.select<SVGLineElement>('line.hit');
+
+    // Initial style application (visible + hit sizing)
     merged.each((d, i, nodes) => {
-      this.applyLinkStyles(d3.select(nodes[i]) as any, d);
+      const group = d3.select(nodes[i]);
+      const v = group.select<SVGLineElement>('line.visible');
+      this.applyLinkStyles(v as any, d);
+      const style = this.getLinkStyle(d);
+      group.select<SVGLineElement>('line.hit')
+        .attr('stroke-width', Math.max(14, style.strokeWidth + 10));
     });
 
     /* removed individual attr chains in favor of centralized applyLinkStyles for reusability in mouseout */
 
 
-    // Link events
-    merged
+    // Link events (attach to hit area for easier interaction)
+    hit
       .on('click', (event, d) => {
         event.stopPropagation();
         if (this.callbacks.onLinkClick) {
@@ -701,12 +799,13 @@ export class GraphManager {
         }
       })
       .on('mouseover', (event, d) => {
-        highlightLink(d3.select(event.currentTarget as SVGLineElement), d);
+        const group = d3.select((event.currentTarget as SVGLineElement).parentNode as SVGGElement);
+        highlightLink(group.select('line.visible') as any, d);
       })
       .on('mouseout', (event, d) => {
         // Re-apply original styles based on metadata
-        const el = d3.select(event.currentTarget);
-        resetLink(el as any, d);
+        const group = d3.select((event.currentTarget as SVGLineElement).parentNode as SVGGElement);
+        resetLink(group.select('line.visible') as any, d);
       })
       .on('pointerdown', (event, d) => {
         if (event.pointerType !== 'touch') return;
@@ -715,7 +814,8 @@ export class GraphManager {
         longPressTriggered.set(el, false);
         const timer = window.setTimeout(() => {
           longPressTriggered.set(el, true);
-          highlightLink(d3.select(el), d);
+          const group = d3.select(el.parentNode as SVGGElement);
+          highlightLink(group.select('line.visible') as any, d);
         }, 280);
         longPressTimers.set(el, timer);
       })
@@ -747,21 +847,18 @@ export class GraphManager {
       });
 
     // Animate in newly created links
-    enter
+    enter.select<SVGLineElement>('line.visible')
       .transition()
       .duration(320)
       .attr('stroke-width', (d: Link) => this.getLinkStyle(d).strokeWidth)
       .attr('stroke-opacity', (d: Link) => this.getLinkStyle(d).strokeOpacity)
-      .attr('stroke-dashoffset', 0)
-      .on('end', function () {
-        d3.select(this).attr('stroke-dasharray', null);
-      });
+      .attr('stroke-dashoffset', null);
 
-    linkElements
+    linkGroups
       .exit()
       .transition()
       .duration(200)
-      .attr('stroke-opacity', 0)
+      .style('opacity', 0)
       .remove();
   }
 
@@ -772,26 +869,52 @@ export class GraphManager {
     const targetMeta = this.nodeMetadata.get(targetId);
     const isPathLink = Boolean(sourceMeta?.isInPath && targetMeta?.isInPath);
     const gradientId = isPathLink ? this.getGradientId(sourceId, targetId) : undefined;
+    const isBacklink = typeof d.type === 'string' && d.type.includes('backlink');
+
+    const focusActive = this.focusNodeId !== null;
+    const isIncidentToFocus = focusActive && (sourceId === this.focusNodeId || targetId === this.focusNodeId);
+    const isBetweenNeighbors = focusActive && this.focusNeighborIds.has(sourceId) && this.focusNeighborIds.has(targetId);
 
     const isDimmed =
       Boolean(sourceMeta?.isDimmed || sourceMeta?.isDimmedByPath) ||
       Boolean(targetMeta?.isDimmed || targetMeta?.isDimmedByPath);
 
-    const stroke = (() => {
+    const baseStroke = (() => {
       if (isDimmed) return '#555';
-      if (sourceMeta?.isInPath && targetMeta?.isInPath) return '#00ff88';
+      if (isPathLink) return '#00ff88';
+      if (isBacklink) return '#ffb020';
       return '#888';
     })();
 
-    const strokeWidth = (() => {
+    const baseStrokeWidth = (() => {
       if (isDimmed) return 1;
-      if (sourceMeta?.isInPath && targetMeta?.isInPath) return 4;
-      return 3;
+      if (isPathLink) return 4;
+      return isBacklink ? 2 : 3;
+    })();
+
+    const baseStrokeOpacity = (() => {
+      if (isDimmed) return 0.12;
+      if (isPathLink) return 0.85;
+      return isBacklink ? 0.5 : 0.6;
+    })();
+
+    const stroke = (() => {
+      if (isIncidentToFocus) return isBacklink ? '#ffb020' : '#22d3ee';
+      return baseStroke;
+    })();
+
+    const strokeWidth = (() => {
+      if (isIncidentToFocus) return 5;
+      if (focusActive && isBetweenNeighbors) return Math.max(2, baseStrokeWidth - 0.5);
+      if (focusActive) return Math.max(1.5, baseStrokeWidth - 1);
+      return baseStrokeWidth;
     })();
 
     const strokeOpacity = (() => {
-      if (isDimmed) return 0.12;
-      return 0.6;
+      if (isIncidentToFocus) return 0.98;
+      if (focusActive && isBetweenNeighbors) return Math.max(0.30, baseStrokeOpacity * 0.55);
+      if (focusActive) return Math.max(0.30, baseStrokeOpacity * 0.55);
+      return baseStrokeOpacity;
     })();
 
     return {
@@ -800,16 +923,23 @@ export class GraphManager {
       strokeOpacity,
       useGradient: isPathLink,
       gradientId,
+      dasharray: isBacklink ? '6 10' : undefined,
     };
   }
 
-  private applyLinkStyles(selection: d3.Selection<any, Link, any, any>, d: Link) {
+  private applyLinkStyles(
+    selection: d3.Selection<any, Link, any, any>,
+    d: Link,
+    _options: { preserveDashAnimation?: boolean } = {}
+  ) {
     const style = this.getLinkStyle(d);
     const strokeValue = style.gradientId ? `url(#${style.gradientId})` : style.stroke;
     selection
       .attr('stroke', strokeValue)
       .attr('stroke-width', style.strokeWidth)
       .attr('stroke-opacity', style.strokeOpacity);
+
+    selection.attr('stroke-dasharray', style.dasharray ?? null);
   }
 
   private isPathLink(d: Link) {
@@ -913,9 +1043,18 @@ export class GraphManager {
       const meta: Partial<NodeMetadata> = this.nodeMetadata.get(d.id) || {};
 
       // Update opacity based on dimming (focus vs path)
+      const isFocusTarget = Boolean(meta.isFocusTarget);
+      const isFocusNeighbor = Boolean(meta.isFocusNeighbor);
       const isDimmedByPath = Boolean(meta.isDimmedByPath);
       const isDimmedByFocus = Boolean(meta.isDimmed);
-      const opacity = isDimmedByPath ? 0.15 : isDimmedByFocus ? 0.4 : 1;
+      const opacity = (() => {
+        if (isFocusTarget) return 1;
+        if (isFocusNeighbor) return 0.92;
+        if (isDimmedByPath && isDimmedByFocus) return 0.70;
+        if (isDimmedByPath) return 0.78;
+        if (isDimmedByFocus) return 0.86;
+        return 1;
+      })();
       group.attr('opacity', opacity);
 
       // Calculate radius based on connections
@@ -925,6 +1064,9 @@ export class GraphManager {
         return sourceId === d.id || targetId === d.id;
       }).length;
       const radius = Math.min(30 + connections * 0.5, 60) * this.nodeSizeScale;
+
+      const focusScale = this.getFocusScale(meta);
+      inner.attr('transform', `scale(${focusScale})`);
 
       // Background image circle if thumbnail exists
       if (meta.thumbnail) {
@@ -941,7 +1083,25 @@ export class GraphManager {
         .attr('fill', color)
         .attr('fill-opacity', meta.thumbnail ? 0.3 : 1)
         .attr('stroke', this.getNodeStroke(meta))
-        .attr('stroke-width', this.getNodeStrokeWidth(meta));
+        .attr('stroke-width', this.getNodeStrokeWidth(meta))
+        .attr('filter', isFocusTarget ? 'url(#focus-glow)' : isFocusNeighbor ? 'url(#neighbor-glow)' : null);
+
+      if (isFocusTarget) {
+        inner.insert('circle', ':first-child')
+          .attr('r', radius + 9)
+          .attr('fill', 'none')
+          .attr('stroke', '#22d3ee')
+          .attr('stroke-opacity', 0.55)
+          .attr('stroke-width', 4)
+          .attr('stroke-dasharray', '10 14');
+      } else if (isFocusNeighbor) {
+        inner.insert('circle', ':first-child')
+          .attr('r', radius + 7)
+          .attr('fill', 'none')
+          .attr('stroke', '#a855f7')
+          .attr('stroke-opacity', 0.22)
+          .attr('stroke-width', 3);
+      }
 
       // Text label
       this.addTextLabel(inner as any, d.title, radius);
@@ -949,19 +1109,23 @@ export class GraphManager {
 
     // Setup click handlers
     merged
-      .on('mouseenter', (event: MouseEvent) => {
+      .on('mouseenter', (event: MouseEvent, d) => {
         if ((event as any).buttons) return;
         const outer = d3.select(event.currentTarget as any);
         outer.raise();
         const inner = outer.select('g.node-inner');
+        const meta = this.nodeMetadata.get((d as Node).id) || {};
+        const hoverScale = this.getFocusScale(meta) * 1.08;
         inner.interrupt();
-        inner.transition().duration(120).attr('transform', 'scale(1.18)');
+        inner.transition().duration(120).attr('transform', `scale(${hoverScale})`);
       })
-      .on('mouseleave', (event: MouseEvent) => {
+      .on('mouseleave', (event: MouseEvent, d) => {
         const outer = d3.select(event.currentTarget as any);
         const inner = outer.select('g.node-inner');
+        const meta = this.nodeMetadata.get((d as Node).id) || {};
+        const baseScale = this.getFocusScale(meta);
         inner.interrupt();
-        inner.transition().duration(150).attr('transform', 'scale(1)');
+        inner.transition().duration(150).attr('transform', `scale(${baseScale})`);
       })
       .on('click', (event: MouseEvent, d) => {
         if (!event.defaultPrevented && this.callbacks.onNodeClick) {
@@ -984,10 +1148,16 @@ export class GraphManager {
 
     enter
       .select('g.node-inner')
-      .attr('transform', 'scale(0.88)')
+      .attr('transform', (d: any) => {
+        const meta = this.nodeMetadata.get((d as Node).id) || {};
+        return `scale(${this.getFocusScale(meta) * 0.88})`;
+      })
       .transition()
       .duration(240)
-      .attr('transform', 'scale(1)');
+      .attr('transform', (d: any) => {
+        const meta = this.nodeMetadata.get((d as Node).id) || {};
+        return `scale(${this.getFocusScale(meta)})`;
+      });
 
     nodeGroups
       .exit()
@@ -1003,11 +1173,25 @@ export class GraphManager {
     if (meta.isPathEndpoint) return '#ff8800'; // Orange for selected path endpoints
     if (meta.isBulkSelected) return '#ff8800'; // Orange for bulk-selected
     if (meta.isUserTyped) return '#0088ff'; // Blue for user-typed (fallback)
+    if (meta.isAutoDiscovered && meta.colorSeed) return this.hashColor(meta.colorSeed, 0.62); // Cluster by description
     if (meta.isAutoDiscovered) return '#9966ff'; // Purple for auto-discovered (fallback)
     return '#0088ff'; // Default blue (fallback)
   }
 
+  private hashColor(seed: string, saturation: number = 0.65, lightness: number = 0.52): string {
+    let hash = 0;
+    for (let i = 0; i < seed.length; i++) {
+      hash = ((hash << 5) - hash + seed.charCodeAt(i)) | 0;
+    }
+    const hue = Math.abs(hash) % 360;
+    const s = Math.round(saturation * 100);
+    const l = Math.round(lightness * 100);
+    return `hsl(${hue}, ${s}%, ${l}%)`;
+  }
+
   private getNodeStroke(meta: Partial<NodeMetadata>): string {
+    if (meta.isFocusTarget) return '#22d3ee';
+    if (meta.isFocusNeighbor) return '#a855f7';
     if (meta.isPathEndpoint) return '#ffdd00'; // Yellow stroke for endpoints
     if (meta.isBulkSelected) return '#ffff00'; // Yellow stroke for bulk-selected
     if (meta.isCurrentlyExploring) return '#ff6600'; // Orange stroke for exploring
@@ -1016,12 +1200,20 @@ export class GraphManager {
   }
 
   private getNodeStrokeWidth(meta: Partial<NodeMetadata>): number {
+    if (meta.isFocusTarget) return 6;
+    if (meta.isFocusNeighbor) return 4;
     if (meta.isCurrentlyExploring) return 4;
     if (meta.isPathEndpoint) return 5;
     if (meta.isBulkSelected) return 3;
     if (meta.isExpanded) return 3;
     if (meta.isDimmed) return 1;
     return 2;
+  }
+
+  private getFocusScale(meta: Partial<NodeMetadata>): number {
+    if (meta.isFocusTarget) return 1.18;
+    if (meta.isFocusNeighbor) return 1.06;
+    return 1;
   }
 
   private addTextLabel(group: d3.Selection<SVGGElement, any, any, any>, title: string, radius: number) {
@@ -1112,7 +1304,7 @@ export class GraphManager {
 
   private onTick() {
     // Update link positions
-    this.linksGroup.selectAll('line')
+    this.linksGroup.selectAll('g.link line')
       .attr('x1', (d: any) => d.source.x)
       .attr('y1', (d: any) => d.source.y)
       .attr('x2', (d: any) => d.target.x)

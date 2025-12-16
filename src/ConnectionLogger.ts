@@ -3,7 +3,7 @@ export interface ConnectionLog {
   source: string;
   target: string;
   timestamp: number;
-  type: 'manual' | 'auto' | 'expand' | 'path';
+  type: 'manual' | 'auto' | 'expand' | 'path' | 'backlink' | 'expand_backlink';
   weight?: number;
 }
 
