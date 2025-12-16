@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useReducer } from 'react';
 import { GraphManager, Node as GraphNode, Link, GraphStateSnapshot } from './GraphManager';
 import { UpdateQueue } from './UpdateQueue';
 import { WikiService, LinkWithContext } from './WikiService';
@@ -8,6 +8,7 @@ import { GraphControls } from './components/GraphControls';
 import { NodeDetailsPanel } from './components/NodeDetailsPanel';
 import { SearchStatusOverlay } from './components/SearchStatusOverlay';
 import { LensingGridBackground } from './components/LensingGridBackground';
+import { ConnectionStatusBar } from './components/ConnectionStatusBar';
 import type { SearchProgress } from './types/SearchProgress';
 import { runPathfinder } from './features/pathfinding/runPathfinder';
 import { SUGGESTED_PATHS, type SuggestedPath } from './data/suggestedPaths';
@@ -41,7 +42,40 @@ const WikiWebExplorer = () => {
   const [showFeaturedPaths, setShowFeaturedPaths] = useState(true);
 
   // Link Context State
-  const [activeLinkContexts, setActiveLinkContexts] = useState<Set<string>>(new Set());
+  const [, setActiveLinkContexts] = useState<Set<string>>(new Set());
+  const [hoveredLinkId, setHoveredLinkId] = useState<string | null>(null);
+  const [pinnedState, dispatchPinned] = useReducer(
+    (state: { ids: string[]; selectedId: string | null }, action: any) => {
+      switch (action.type) {
+        case 'toggle': {
+          const id = action.id as string;
+          const exists = state.ids.includes(id);
+          const ids = exists ? state.ids.filter(x => x !== id) : [...state.ids, id];
+          const selectedId = exists
+            ? (state.selectedId === id ? (ids.length > 0 ? ids[ids.length - 1] : null) : state.selectedId)
+            : id;
+          return { ids, selectedId };
+        }
+        case 'remove': {
+          const id = action.id as string;
+          const ids = state.ids.filter(x => x !== id);
+          const selectedId = state.selectedId === id ? (ids.length > 0 ? ids[ids.length - 1] : null) : state.selectedId;
+          return { ids, selectedId };
+        }
+        case 'select': {
+          const id = action.id as string | null;
+          return { ...state, selectedId: id };
+        }
+        case 'clear': {
+          return { ids: [], selectedId: null };
+        }
+        default:
+          return state;
+      }
+    },
+    { ids: [], selectedId: null }
+  );
+  const [, setLinkContextVersion] = useState(0);
 
   // Search Progress State
   const [searchProgress, setSearchProgress] = useState<SearchProgress>({
@@ -247,17 +281,17 @@ const WikiWebExplorer = () => {
       onNodeClick: (node, event) => handleNodeClick(event as any, node),
       onNodeDoubleClick: (node, event) => handleNodeDoubleClick(event as any, node),
       onLinkClick: (link, event) => handleLinkClick(event as any, link),
+      onLinkHover: (link) => {
+        setHoveredLinkId(link.id);
+      },
+      onLinkHoverEnd: (link) => {
+        setHoveredLinkId(prev => (prev === link.id ? null : prev));
+      },
       onBackgroundClick: () => {
         graphManagerRef.current?.highlightNode(null);
         setClickedNode(null);
         setActiveLinkContexts(new Set());
-      },
-      onLinkPopupClose: (linkId) => {
-        setActiveLinkContexts(prev => {
-          const next = new Set(prev);
-          next.delete(linkId);
-          return next;
-        });
+        setHoveredLinkId(null);
       },
       onSelectionChange: (nodes) => setBulkSelectedNodes(nodes),
       onLinksApplied: ({ added, updated }) => {
@@ -272,9 +306,10 @@ const WikiWebExplorer = () => {
           connectionLogger.log(source, target, type);
         });
         updated.forEach(l => {
-          const { source, target } = normalize(l);
-          connectionLogger.log(source, target, 'path');
+          const { source, target, type } = normalize(l);
+          connectionLogger.log(source, target, type);
         });
+        if (added.length > 0 || updated.length > 0) setLinkContextVersion(v => v + 1);
       },
       onStatsUpdate: (stats) => {
         setNodeCount(stats.nodeCount);
@@ -984,37 +1019,14 @@ const WikiWebExplorer = () => {
   const handleLinkClick = (event: any, d: Link) => {
     event.stopPropagation();
 
-    // Toggle link context
     if (!d.id) return; // Should have ID now
-    const isOn = activeLinkContexts.has(d.id);
 
-    if (!isOn && !d.context && graphManagerRef.current) {
-      const source = typeof d.source === 'object' ? d.source.id : d.source;
-      const target = typeof d.target === 'object' ? d.target.id : d.target;
-      const linkId = d.id;
-      const linkType = d.type;
-
-      // Lazy-fetch missing snippet context (especially useful for incoming links + path hops).
-      void WikiService.fetchLinkContext(source, target).then((context) => {
-        const nextContext = context || (() => {
-          if (typeof linkType === 'string' && linkType.includes('backlink')) {
-            return `Snippet unavailable. Connection confirmed because “${source}” contains a link to “${target}”.`;
-          }
-          return `Snippet unavailable. Connection confirmed because “${source}” contains a link to “${target}”.`;
-        })();
-        graphManagerRef.current?.addLinks([{
-          source,
-          target,
-          id: linkId,
-          type: linkType,
-          context: nextContext,
-        }]);
-      });
-    }
+    // Click pins/unpins the connection (multi-pin).
+    dispatchPinned({ type: 'toggle', id: d.id });
 
     setActiveLinkContexts(prev => {
       const next = new Set(prev);
-      if (isOn) next.delete(d.id!);
+      if (next.has(d.id!)) next.delete(d.id!);
       else next.add(d.id!);
       return next;
     });
@@ -1029,9 +1041,37 @@ const WikiWebExplorer = () => {
     graphManagerRef.current?.setPathHighlight(pathNodes.size > 0 ? pathNodes : null);
   }, [pathNodes]);
 
+  const displayedLinkId =
+    pinnedState.selectedId ||
+    hoveredLinkId ||
+    (pinnedState.ids.length > 0 ? pinnedState.ids[pinnedState.ids.length - 1] : null);
+  const displayedLink = displayedLinkId ? graphManagerRef.current?.getLinkById(displayedLinkId) || null : null;
+  const pinnedLinks = pinnedState.ids
+    .map(id => graphManagerRef.current?.getLinkById(id))
+    .filter((x): x is Link => Boolean(x));
+
   useEffect(() => {
-    graphManagerRef.current?.setActiveLinkPopups(Array.from(activeLinkContexts));
-  }, [activeLinkContexts]);
+    if (!displayedLinkId || !graphManagerRef.current) return;
+    const link = graphManagerRef.current.getLinkById(displayedLinkId);
+    if (!link || link.context) return;
+    const source = typeof link.source === 'object' ? link.source.id : link.source;
+    const target = typeof link.target === 'object' ? link.target.id : link.target;
+
+    const handle = window.setTimeout(() => {
+      void WikiService.fetchLinkContext(source, target).then((context) => {
+        const nextContext = context || `Snippet unavailable. Connection confirmed because “${source}” contains a link to “${target}”.`;
+        graphManagerRef.current?.addLinks([{
+          source,
+          target,
+          id: displayedLinkId,
+          type: link.type,
+          context: nextContext,
+        }]);
+      });
+    }, pinnedState.selectedId ? 0 : 280);
+
+    return () => window.clearTimeout(handle);
+  }, [displayedLinkId, pinnedState.selectedId]);
 
   return (
     <div className="w-screen h-screen bg-gray-900 text-white relative overflow-hidden font-sans">
@@ -1122,6 +1162,28 @@ const WikiWebExplorer = () => {
 
       {/* Connection Analytics */}
       <LogPanel isOpen={logPanelOpen} onClose={() => setLogPanelOpen(false)} />
+
+      <ConnectionStatusBar
+        link={displayedLink}
+        pinnedLinks={pinnedLinks}
+        selectedPinnedLinkId={pinnedState.selectedId}
+        onSelectPinned={(linkId) => dispatchPinned({ type: 'select', id: linkId })}
+        onRemovePinned={(linkId) => dispatchPinned({ type: 'remove', id: linkId })}
+        onPinToggle={() => {
+          if (!displayedLinkId) return;
+          dispatchPinned({ type: 'toggle', id: displayedLinkId });
+        }}
+        onFocusNode={(nodeId) => {
+          const gm = graphManagerRef.current;
+          if (!gm) return;
+          gm.highlightNode(nodeId);
+          gm.centerOnNode(nodeId);
+        }}
+        onClose={() => {
+          dispatchPinned({ type: 'select', id: null });
+          setHoveredLinkId(null);
+        }}
+      />
     </div>
   );
 };
