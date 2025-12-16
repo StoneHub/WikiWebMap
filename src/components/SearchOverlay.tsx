@@ -37,7 +37,7 @@ export const SearchOverlay: React.FC<SearchOverlayProps> = ({
     onBlurSearch,
 }) => {
     return (
-        <div className="absolute top-6 left-6 z-20 w-96 max-w-full">
+        <div className="fixed top-3 left-3 right-3 sm:right-auto sm:top-6 sm:left-6 z-20 sm:w-96 sm:max-w-full">
             <div className="bg-gray-800/90 backdrop-blur-md border border-gray-700 shadow-2xl rounded-2xl p-4 flex flex-col gap-3">
                 <h1 className="text-xl font-bold text-blue-400 bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-500">
                     WikiWeb Explorer

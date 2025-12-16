@@ -25,6 +25,10 @@ export class WikiService {
     private static summaryCache: Map<string, SummaryData> = new Map();
     private static apiUserAgentHeader: string | undefined;
 
+    // Rate limiting: minimum delay between API calls (milliseconds)
+    private static readonly API_CALL_DELAY = 150; // 150ms = ~6-7 requests/second max
+    private static lastApiCallTime = 0;
+
     static setApiUserAgent(value: string | undefined) {
         const next = value?.trim();
         this.apiUserAgentHeader = next ? next : undefined;
@@ -34,8 +38,25 @@ export class WikiService {
         return this.apiUserAgentHeader ? { 'Api-User-Agent': this.apiUserAgentHeader } : undefined;
     }
 
+    /**
+     * Rate limiting helper: Ensures minimum delay between API calls
+     * This prevents aggressive bot-like behavior and respects Wikipedia's servers
+     */
+    private static async enforceRateLimit(): Promise<void> {
+        const now = Date.now();
+        const timeSinceLastCall = now - this.lastApiCallTime;
+
+        if (timeSinceLastCall < this.API_CALL_DELAY) {
+            const delayNeeded = this.API_CALL_DELAY - timeSinceLastCall;
+            await new Promise(resolve => setTimeout(resolve, delayNeeded));
+        }
+
+        this.lastApiCallTime = Date.now();
+    }
+
     static async resolveTitle(query: string): Promise<string> {
         try {
+            await this.enforceRateLimit();
             const response = await fetch(
                 `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(query)}&redirects=1&format=json&origin=*`,
                 { headers: this.getRequestHeaders() }
@@ -65,6 +86,7 @@ export class WikiService {
         }
 
         try {
+            await this.enforceRateLimit();
             // Use parse action to get text content for context extraction
             const response = await fetch(
                 `https://en.wikipedia.org/w/api.php?action=parse&page=${encodeURIComponent(
@@ -165,6 +187,7 @@ export class WikiService {
 
     static async search(term: string): Promise<string[]> {
         try {
+            await this.enforceRateLimit();
             const response = await fetch(
                 `https://en.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(
                     term
@@ -187,6 +210,7 @@ export class WikiService {
         }
 
         try {
+            await this.enforceRateLimit();
             const response = await fetch(
                 `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`,
                 { headers: this.getRequestHeaders() }

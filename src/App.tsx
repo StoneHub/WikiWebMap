@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { GraphManager, Node as GraphNode, Link, GraphStateSnapshot } from './GraphManager';
 import { UpdateQueue } from './UpdateQueue';
 import { WikiService, LinkWithContext } from './WikiService';
@@ -14,6 +14,7 @@ import { runPathfinder } from './features/pathfinding/runPathfinder';
 import { SUGGESTED_PATHS, type SuggestedPath } from './data/suggestedPaths';
 import LogPanel from './components/LogPanel';
 import { connectionLogger } from './ConnectionLogger';
+import { RecaptchaService } from './services/RecaptchaService';
 
 const WikiWebExplorer = () => {
   // UI state
@@ -62,6 +63,7 @@ const WikiWebExplorer = () => {
   const searchQueueRef = useRef<Array<{ id: string; from: string; to: string; source: 'suggested' | 'shift' }>>([]);
   const [activeSearch, setActiveSearch] = useState<{ id: string; from: string; to: string; source: 'suggested' | 'shift' } | null>(null);
   const [searchTerminalMinimized, setSearchTerminalMinimized] = useState(false);
+  const [logPanelOpen, setLogPanelOpen] = useState(false);
 
   // Settings Visibility
   const [showSettings, setShowSettings] = useState(true);
@@ -84,6 +86,7 @@ const WikiWebExplorer = () => {
   const linkContextPositionsRef = useRef<Record<string, { x: number; y: number }>>({});
   const searchDockLinkIdRef = useRef<string | null>(null);
   const mutationEpochRef = useRef(0);
+  const searchDebounceTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     searchQueueRef.current = searchQueue;
@@ -411,6 +414,33 @@ const WikiWebExplorer = () => {
     nodeThumbnails,
   ]);
 
+  // -- Debounced Search Handler --
+  const debouncedSearch = useCallback((term: string) => {
+    // Clear any existing timeout
+    if (searchDebounceTimeoutRef.current) {
+      clearTimeout(searchDebounceTimeoutRef.current);
+    }
+
+    // If term is too short, clear suggestions immediately
+    if (term.length < 2) {
+      setSuggestions([]);
+      setShowSuggestions(false);
+      return;
+    }
+
+    // Set a new timeout for the search (500ms debounce)
+    searchDebounceTimeoutRef.current = setTimeout(async () => {
+      try {
+        const results = await WikiService.search(term);
+        setSuggestions(results);
+        setShowSuggestions(true);
+      } catch (err) {
+        console.error('Search failed:', err);
+        setSuggestions([]);
+      }
+    }, 500);
+  }, []);
+
   // -- Actions --
 
   const addTopic = async (title: string, silent = false) => {
@@ -625,7 +655,14 @@ const WikiWebExplorer = () => {
       },
     });
 
-  const enqueueSearch = (from: string, to: string, source: 'suggested' | 'shift') => {
+  const enqueueSearch = async (from: string, to: string, source: 'suggested' | 'shift') => {
+    // Bot protection: verify reCAPTCHA before allowing pathfinding
+    const passedVerification = await RecaptchaService.verify('pathfinding');
+    if (!passedVerification) {
+      setError('Bot verification failed. Please try again.');
+      return;
+    }
+
     setSearchQueue(prev => {
       if (prev.length >= 3 || searchQueueRef.current.length >= 3) {
         setError('Search queue full (max 3).');
@@ -702,8 +739,8 @@ const WikiWebExplorer = () => {
     }
   };
 
-  const runSuggestedPath = (from: string, to: string) => {
-    enqueueSearch(from, to, 'suggested');
+  const runSuggestedPath = async (from: string, to: string) => {
+    await enqueueSearch(from, to, 'suggested');
   };
 
   const expandNode = async (title: string) => {
@@ -789,6 +826,10 @@ const WikiWebExplorer = () => {
     }
 
     if (event.shiftKey) {
+      let shouldEnqueue = false;
+      let n1Id = '';
+      let n2Id = '';
+
       setPathSelectedNodes(prev => {
         const newSelection = [...prev];
         const index = newSelection.findIndex(n => n.id === d.id);
@@ -808,12 +849,18 @@ const WikiWebExplorer = () => {
           if (directLink) {
             // Optional: Auto-open context here?
           }
-          enqueueSearch(n1.id, n2.id, 'shift');
+          shouldEnqueue = true;
+          n1Id = n1.id;
+          n2Id = n2.id;
         } else {
           setPathNodes(new Set()); setError('');
         }
         return newSelection;
       });
+
+      if (shouldEnqueue) {
+        await enqueueSearch(n1Id, n2Id, 'shift');
+      }
       return;
     }
 
@@ -871,17 +918,10 @@ const WikiWebExplorer = () => {
         showFeaturedPaths={showFeaturedPaths}
         onFocusSearch={() => setShowFeaturedPaths(true)}
         onBlurSearch={() => setShowFeaturedPaths(false)}
-        onSearchChange={async (e) => {
+        onSearchChange={(e) => {
           const term = e.target.value;
           setSearchTerm(term);
-          if (term.length >= 2) {
-            const results = await WikiService.search(term);
-            setSuggestions(results);
-            setShowSuggestions(true);
-          } else {
-            setSuggestions([]);
-            setShowSuggestions(false);
-          }
+          debouncedSearch(term);
         }}
         onAddTopic={addTopicFromSearchUI}
         onRunSuggestedPath={runSuggestedPath}
@@ -925,6 +965,7 @@ const WikiWebExplorer = () => {
         isMinimized={searchTerminalMinimized}
         onToggleMinimize={() => setSearchTerminalMinimized(v => !v)}
         persistentVisible={keepSearching || searchQueue.length > 0 || Boolean(activeSearch)}
+        onOpenLogs={() => setLogPanelOpen(true)}
       />
 
       {/* Floating Node Details - Side Panel */}
@@ -954,7 +995,7 @@ const WikiWebExplorer = () => {
       />
 
       {/* Connection Analytics */}
-      <LogPanel />
+      <LogPanel isOpen={logPanelOpen} onClose={() => setLogPanelOpen(false)} />
     </div>
   );
 };

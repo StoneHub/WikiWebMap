@@ -34,7 +34,7 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
     onDeleteSelection,
 }) => {
     return (
-        <div className="fixed bottom-3 right-3 md:bottom-8 md:right-6 z-20 flex flex-col items-end gap-2 md:gap-3 pointer-events-none">
+        <div className="fixed bottom-20 left-3 sm:bottom-8 sm:left-6 z-20 flex flex-col items-start gap-2 sm:gap-3 pointer-events-none">
             <div className="pointer-events-auto">
                 <button
                     onClick={() => setShowSettings(!showSettings)}
@@ -54,7 +54,7 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
 
             {/* Settings Bubble */}
             {showSettings && (
-                <div className="bg-gray-800/90 backdrop-blur-md border border-gray-700/50 rounded-2xl p-4 shadow-2xl w-full md:w-64 animate-fade-in-up pointer-events-auto">
+                <div className="bg-gray-800/90 backdrop-blur-md border border-gray-700/50 rounded-2xl p-4 shadow-2xl w-64 max-w-[calc(100vw-2rem)] animate-fade-in-up pointer-events-auto">
                     <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">
                         Graph Physics
                     </h3>
@@ -129,26 +129,32 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                             </div>
                         </div>
                     </div>
+                    <div className="mt-4 pt-3 border-t border-gray-700/50 text-[9px] text-gray-500 leading-relaxed">
+                        Protected by reCAPTCHA.{' '}
+                        <a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer" className="underline hover:text-gray-400">Privacy</a>
+                        {' · '}
+                        <a href="https://policies.google.com/terms" target="_blank" rel="noopener noreferrer" className="underline hover:text-gray-400">Terms</a>
+                    </div>
                 </div>
             )}
 
-            <div className="flex w-full md:w-auto gap-2 bg-gray-900/80 backdrop-blur-md border border-gray-700/60 rounded-2xl p-2 shadow-2xl pointer-events-auto">
+            <div className="flex gap-2 bg-gray-900/80 backdrop-blur-md border border-gray-700/60 rounded-2xl p-2 shadow-2xl pointer-events-auto">
                 <button
                     onClick={onPruneLeaves}
-                    className="h-12 px-5 bg-gray-800/80 hover:bg-gray-700/80 border border-gray-600/50 rounded-xl shadow-xl flex-1 md:flex-none flex items-center justify-center gap-2 text-gray-200 hover:text-white transition-all hover:scale-[1.02]"
+                    className="h-10 sm:h-12 px-3 sm:px-5 bg-gray-800/80 hover:bg-gray-700/80 border border-gray-600/50 rounded-xl shadow-xl flex items-center justify-center gap-1.5 sm:gap-2 text-gray-200 hover:text-white transition-all hover:scale-[1.02]"
                     title="Remove nodes with fewer than 2 connections"
                 >
-                    <span className="text-lg">✂️</span>
-                    <span className="font-semibold text-sm">Prune</span>
+                    <span className="text-base sm:text-lg">✂️</span>
+                    <span className="font-semibold text-xs sm:text-sm">Prune</span>
                 </button>
 
                 <button
                     onClick={onDeleteSelection}
-                    className="h-12 px-5 bg-gray-800/70 hover:bg-red-900/80 border border-gray-600/50 hover:border-red-500/50 rounded-xl shadow-xl flex-1 md:flex-none flex items-center justify-center gap-2 text-gray-200 hover:text-white transition-all hover:scale-[1.02]"
+                    className="h-10 sm:h-12 px-3 sm:px-5 bg-gray-800/70 hover:bg-red-900/80 border border-gray-600/50 hover:border-red-500/50 rounded-xl shadow-xl flex items-center justify-center gap-1.5 sm:gap-2 text-gray-200 hover:text-white transition-all hover:scale-[1.02]"
                     title="Delete Alt/Option+Drag selected nodes"
                 >
-                    <span className="text-lg">🗑️</span>
-                    <span className="font-semibold text-sm">Delete</span>
+                    <span className="text-base sm:text-lg">🗑️</span>
+                    <span className="font-semibold text-xs sm:text-sm">Delete</span>
                 </button>
             </div>
         </div>
