@@ -21,3 +21,8 @@ svg {
 svg * {
   vector-effect: non-scaling-stroke;
 }
+
+/* Hide reCAPTCHA badge - attribution is shown in footer per Google's TOS */
+.grecaptcha-badge {
+  visibility: hidden !important;
+}

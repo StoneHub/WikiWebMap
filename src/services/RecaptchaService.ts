@@ -20,7 +20,7 @@ declare global {
 export class RecaptchaService {
   // Get site key from environment variable
   // Test key will always pass - Replace with your actual key in production
-  private static readonly SITE_KEY = (import.meta as any).env?.VITE_RECAPTCHA_SITE_KEY || '6LeIxAcTAAAAAJcZVRqyHh71UMIEGNQ_MXjiZKhI';
+  private static readonly SITE_KEY = import.meta.env.VITE_RECAPTCHA_SITE_KEY || '6LeFqi0sAAAAAFtOhr-p-WVjbTvKe7XVdwAc_2aR';
 
   // Cache for recent verifications to avoid excessive checks
   private static lastVerification: { timestamp: number; passed: boolean } | null = null;

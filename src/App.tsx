@@ -63,6 +63,7 @@ const WikiWebExplorer = () => {
   const searchQueueRef = useRef<Array<{ id: string; from: string; to: string; source: 'suggested' | 'shift' }>>([]);
   const [activeSearch, setActiveSearch] = useState<{ id: string; from: string; to: string; source: 'suggested' | 'shift' } | null>(null);
   const [searchTerminalMinimized, setSearchTerminalMinimized] = useState(false);
+  const [logPanelOpen, setLogPanelOpen] = useState(false);
 
   // Settings Visibility
   const [showSettings, setShowSettings] = useState(true);
@@ -964,6 +965,7 @@ const WikiWebExplorer = () => {
         isMinimized={searchTerminalMinimized}
         onToggleMinimize={() => setSearchTerminalMinimized(v => !v)}
         persistentVisible={keepSearching || searchQueue.length > 0 || Boolean(activeSearch)}
+        onOpenLogs={() => setLogPanelOpen(true)}
       />
 
       {/* Floating Node Details - Side Panel */}
@@ -993,7 +995,7 @@ const WikiWebExplorer = () => {
       />
 
       {/* Connection Analytics */}
-      <LogPanel />
+      <LogPanel isOpen={logPanelOpen} onClose={() => setLogPanelOpen(false)} />
     </div>
   );
 };

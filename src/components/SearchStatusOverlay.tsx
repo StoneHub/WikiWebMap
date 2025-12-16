@@ -19,6 +19,7 @@ export function SearchStatusOverlay(props: {
   isMinimized: boolean;
   onToggleMinimize: () => void;
   persistentVisible: boolean;
+  onOpenLogs?: () => void;
 }) {
   const renderQueue = () => {
     if (props.queue.length === 0) return null;
@@ -45,7 +46,7 @@ export function SearchStatusOverlay(props: {
 
   if (props.isMinimized) {
     return (
-      <div className="fixed bottom-4 left-4 z-30 pointer-events-none">
+      <div className="fixed bottom-4 right-4 z-30 pointer-events-none">
         <div className="pointer-events-auto bg-black/80 border border-green-500/40 rounded-full px-3 py-2 text-xs text-green-200 flex items-center gap-2 shadow-lg">
           <span>{props.activeSearch ? `Searching ${props.activeSearch.from} → ${props.activeSearch.to}` : 'Search terminal'}</span>
           {props.queue.length > 0 && <span className="bg-green-700/50 px-2 py-0.5 rounded-full text-[11px]">+{props.queue.length}</span>}
@@ -63,7 +64,7 @@ export function SearchStatusOverlay(props: {
   if (props.searchProgress.isSearching) {
     const wrapperClassName = props.isDocked
       ? 'absolute z-30 w-80 pointer-events-none'
-      : 'absolute bottom-6 left-6 z-30 w-80 pointer-events-none';
+      : 'fixed bottom-3 right-3 left-3 sm:left-auto sm:bottom-6 sm:right-6 z-30 sm:w-80 pointer-events-none';
 
     const wrapperStyle = props.isDocked && props.dockPosition
       ? {
@@ -148,8 +149,8 @@ export function SearchStatusOverlay(props: {
 
   if (props.persistentVisible || props.queue.length > 0) {
     return (
-      <div className="fixed bottom-6 left-6 z-20 pointer-events-none">
-        <div className="bg-black/80 backdrop-blur-md border border-green-500/30 rounded-xl p-3 text-xs text-green-300 shadow-xl pointer-events-auto w-80">
+      <div className="fixed bottom-3 right-3 left-3 sm:left-auto sm:bottom-6 sm:right-6 z-20 pointer-events-none">
+        <div className="bg-black/80 backdrop-blur-md border border-green-500/30 rounded-xl p-3 text-xs text-green-300 shadow-xl pointer-events-auto sm:w-80">
           <div className="flex items-center justify-between mb-2">
             <span className="font-semibold">Search Terminal</span>
             <button
@@ -166,8 +167,8 @@ export function SearchStatusOverlay(props: {
   }
 
   return (
-    <div className="absolute bottom-6 left-6 z-20 pointer-events-none">
-      <div className="bg-gray-800/60 backdrop-blur-sm border border-gray-700/30 rounded-full px-4 py-2 text-xs text-gray-400 flex gap-4 shadow-lg">
+    <div className="fixed bottom-3 right-3 sm:bottom-6 sm:right-6 z-20 pointer-events-none">
+      <div className="bg-gray-800/60 backdrop-blur-sm border border-gray-700/30 rounded-full px-3 sm:px-4 py-2 text-[11px] sm:text-xs text-gray-400 flex flex-wrap items-center gap-x-2 sm:gap-x-4 gap-y-1 shadow-lg justify-center pointer-events-auto">
         <span>
           Nodes: <strong className="text-gray-200">{props.nodeCount}</strong>
         </span>
@@ -180,6 +181,17 @@ export function SearchStatusOverlay(props: {
         <span className="hidden sm:inline">
           Select: <strong className="text-gray-200">Alt+Drag</strong>
         </span>
+        {props.onOpenLogs && (
+          <button
+            onClick={props.onOpenLogs}
+            className="ml-1 sm:ml-2 p-1 rounded-full hover:bg-gray-700/50 text-blue-300 hover:text-blue-200 transition"
+            title="View Connection Logs"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+            </svg>
+          </button>
+        )}
       </div>
     </div>
   );
