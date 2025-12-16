@@ -9,6 +9,7 @@ export interface Node {
   vy?: number;
   fx?: number | null;
   fy?: number | null;
+  metadata?: Partial<NodeMetadata>;
 }
 
 export interface Link {
@@ -31,6 +32,7 @@ export interface GraphCallbacks {
   onNodeDragStart?: (node: Node) => void;
   onLinkClick?: (link: Link, event: MouseEvent) => void;
   onBackgroundClick?: (event: MouseEvent) => void;
+  onLinkPopupClose?: (linkId: string) => void;
   onLinksApplied?: (args: { added: Link[]; updated: Link[] }) => void;
   onStatsUpdate?: (stats: { nodeCount: number; linkCount: number }) => void;
   onSelectionChange?: (selectedNodes: Node[]) => void;
@@ -51,9 +53,25 @@ export interface NodeMetadata {
   isFocusTarget?: boolean;
   isFocusNeighbor?: boolean;
   thumbnail?: string;
+  originSeed?: string;
+  originDepth?: number;
   colorSeed?: string;
   colorRole?: 'root' | 'child';
 }
+
+type PopupNode = {
+  id: string;
+  kind: 'popup';
+  linkId: string;
+  x?: number;
+  y?: number;
+  vx?: number;
+  vy?: number;
+  fx?: number | null;
+  fy?: number | null;
+  anchorX?: number;
+  anchorY?: number;
+};
 
 /**
  * GraphManager - Imperative D3 graph management
@@ -64,11 +82,13 @@ export class GraphManager {
   private g!: d3.Selection<SVGGElement, unknown, null, undefined>;
   private linksGroup!: d3.Selection<SVGGElement, unknown, null, undefined>;
   private nodesGroup!: d3.Selection<SVGGElement, unknown, null, undefined>;
+  private popupsGroup!: d3.Selection<SVGGElement, unknown, null, undefined>;
   private defs!: d3.Selection<SVGDefsElement, unknown, null, undefined>;
   private brushGroup!: d3.Selection<SVGGElement, unknown, null, undefined>;
 
-  private simulation!: d3.Simulation<Node, Link>;
+  private simulation!: d3.Simulation<Node | PopupNode, Link>;
   private nodes: Node[] = [];
+  private popupNodes: PopupNode[] = [];
   private links: Link[] = [];
 
   // Metadata maps for node styling
@@ -136,6 +156,7 @@ export class GraphManager {
     // Create groups for links and nodes
     this.linksGroup = this.g.append('g').attr('class', 'links');
     this.nodesGroup = this.g.append('g').attr('class', 'nodes');
+    this.popupsGroup = this.g.append('g').attr('class', 'link-popups');
 
     // Create defs for image patterns
     this.defs = this.svg.append('defs');
@@ -197,13 +218,14 @@ export class GraphManager {
   }
 
   private initializeSimulation() {
-    this.simulation = d3.forceSimulation<Node>(this.nodes)
-      .force('link', d3.forceLink<Node, Link>(this.links)
+    this.simulation = d3.forceSimulation<Node | PopupNode>(this.getSimulationNodes())
+      .force('link', d3.forceLink<Node | PopupNode, Link>(this.links)
         .id((d: any) => d.id)
         .distance(this.nodeSpacing))
-      .force('charge', d3.forceManyBody().strength(-500)) // Stronger repulsion
+      .force('charge', d3.forceManyBody().strength((d: any) => d?.kind === 'popup' ? 0 : -500)) // Stronger repulsion
       .force('center', d3.forceCenter(this.width / 2, this.height / 2))
       .force('collision', d3.forceCollide().radius((d: any) => {
+        if (d?.kind === 'popup') return 130 * this.nodeSizeScale;
         const node = d as Node;
         // Dynamic collision based on connection count
         const connections = this.links.filter(l =>
@@ -215,6 +237,14 @@ export class GraphManager {
       .on('tick', () => this.onTick());
   }
 
+  private getSimulationNodes(): Array<Node | PopupNode> {
+    return [...this.nodes, ...this.popupNodes];
+  }
+
+  private syncSimulationNodes() {
+    this.simulation.nodes(this.getSimulationNodes());
+  }
+
   /**
    * Add nodes to the graph (idempotent - won't add duplicates)
    */
@@ -223,16 +253,20 @@ export class GraphManager {
 
     newNodes.forEach(node => {
       if (!this.nodes.find(n => n.id === node.id)) {
-        // Give node initial random position if not set
-        if (node.x === undefined) node.x = this.width / 2 + (Math.random() - 0.5) * 300;
-        if (node.y === undefined) node.y = this.height / 2 + (Math.random() - 0.5) * 300;
+        const incomingMetadata = node.metadata;
+        const cleanNode: Node = { ...node };
+        delete (cleanNode as any).metadata;
 
-        this.nodes.push(node);
+        // Give node initial random position if not set
+        if (cleanNode.x === undefined) cleanNode.x = this.width / 2 + (Math.random() - 0.5) * 300;
+        if (cleanNode.y === undefined) cleanNode.y = this.height / 2 + (Math.random() - 0.5) * 300;
+
+        this.nodes.push(cleanNode);
         added++;
 
         // Initialize metadata if not exists
-        if (!this.nodeMetadata.has(node.id)) {
-          this.nodeMetadata.set(node.id, {
+        if (!this.nodeMetadata.has(cleanNode.id)) {
+          this.nodeMetadata.set(cleanNode.id, {
             isUserTyped: false,
             isAutoDiscovered: false,
             isExpanded: false,
@@ -242,6 +276,8 @@ export class GraphManager {
             isSelected: false,
             isPathEndpoint: false,
             isBulkSelected: false,
+            originSeed: undefined,
+            originDepth: undefined,
             colorSeed: undefined,
             colorRole: undefined,
             isDimmed: false, // Focus dimming
@@ -250,11 +286,16 @@ export class GraphManager {
             isFocusNeighbor: false
           });
         }
+
+        if (incomingMetadata) {
+          const existing = this.nodeMetadata.get(cleanNode.id)!;
+          this.nodeMetadata.set(cleanNode.id, { ...existing, ...incomingMetadata });
+        }
       }
     });
 
     if (added > 0) {
-      this.simulation.nodes(this.nodes);
+      this.syncSimulationNodes();
       this.simulation.alpha(0.3).restart();
       this.updateDOM();
       this.notifyStats();
@@ -302,7 +343,7 @@ export class GraphManager {
     });
 
     if (added > 0) {
-      (this.simulation.force('link') as d3.ForceLink<Node, Link>).links(this.links);
+      (this.simulation.force('link') as d3.ForceLink<any, Link>).links(this.links);
       this.simulation.alpha(0.3).restart();
       this.updateDOM();
       this.notifyStats();
@@ -330,8 +371,8 @@ export class GraphManager {
 
     this.nodeMetadata.delete(nodeId);
 
-    this.simulation.nodes(this.nodes);
-    (this.simulation.force('link') as d3.ForceLink<Node, Link>).links(this.links);
+    this.syncSimulationNodes();
+    (this.simulation.force('link') as d3.ForceLink<any, Link>).links(this.links);
     this.updateDOM();
     this.notifyStats();
   }
@@ -365,8 +406,8 @@ export class GraphManager {
 
       nodesToDelete.forEach(id => this.nodeMetadata.delete(id));
 
-      this.simulation.nodes(this.nodes);
-      (this.simulation.force('link') as d3.ForceLink<Node, Link>).links(this.links);
+      this.syncSimulationNodes();
+      (this.simulation.force('link') as d3.ForceLink<any, Link>).links(this.links);
 
       // Force aggressive reorganization
       this.simulation.alpha(1).restart();
@@ -392,6 +433,8 @@ export class GraphManager {
       isSelected: false,
       isPathEndpoint: false,
       isBulkSelected: false,
+      originSeed: undefined,
+      originDepth: undefined,
       colorSeed: undefined,
       colorRole: undefined,
       isDimmed: false,
@@ -499,6 +542,8 @@ export class GraphManager {
         isSelected: false,
         isPathEndpoint: false,
         isBulkSelected: false,
+        originSeed: undefined,
+        originDepth: undefined,
         colorSeed: undefined,
         colorRole: undefined,
         isDimmed: false,
@@ -570,7 +615,7 @@ export class GraphManager {
    */
   setNodeSpacing(spacing: number) {
     this.nodeSpacing = spacing;
-    (this.simulation.force('link') as d3.ForceLink<Node, Link>).distance(spacing);
+    (this.simulation.force('link') as d3.ForceLink<any, Link>).distance(spacing);
     this.simulation.alpha(0.3).restart();
   }
 
@@ -597,12 +642,13 @@ export class GraphManager {
   clear() {
     this.nodes = [];
     this.links = [];
+    this.popupNodes = [];
     this.nodeMetadata.clear();
     this.focusNodeId = null;
     this.focusNeighborIds = new Set();
 
-    this.simulation.nodes(this.nodes);
-    (this.simulation.force('link') as d3.ForceLink<Node, Link>).links(this.links);
+    this.syncSimulationNodes();
+    (this.simulation.force('link') as d3.ForceLink<any, Link>).links(this.links);
     this.updateDOM();
     this.notifyStats();
   }
@@ -679,6 +725,9 @@ export class GraphManager {
 
     // Update nodes
     this.updateNodes();
+
+    // Update in-map link popups
+    this.updatePopups();
 
     // Force initial tick to position elements
     this.onTick();
@@ -879,10 +928,14 @@ export class GraphManager {
       Boolean(sourceMeta?.isDimmed || sourceMeta?.isDimmedByPath) ||
       Boolean(targetMeta?.isDimmed || targetMeta?.isDimmedByPath);
 
+    const originSeed = sourceMeta?.originSeed || targetMeta?.originSeed;
+    const originDepth = sourceMeta?.originDepth ?? targetMeta?.originDepth ?? 0;
+
     const baseStroke = (() => {
       if (isDimmed) return '#555';
       if (isPathLink) return '#00ff88';
       if (isBacklink) return '#ffb020';
+      if (originSeed) return this.hashColor(originSeed, 0.72, 0.62, Math.max(0, Math.min(12, originDepth)) * 10);
       return '#888';
     })();
 
@@ -899,7 +952,7 @@ export class GraphManager {
     })();
 
     const stroke = (() => {
-      if (isIncidentToFocus) return isBacklink ? '#ffb020' : '#22d3ee';
+      if (isIncidentToFocus) return baseStroke;
       return baseStroke;
     })();
 
@@ -1017,6 +1070,261 @@ export class GraphManager {
     const screenY = transform.applyY(midY);
 
     return { x: screenX, y: screenY };
+  }
+
+  setActiveLinkPopups(linkIds: string[]) {
+    const next = new Set(linkIds);
+    const existingByLinkId = new Map(this.popupNodes.map(n => [n.linkId, n]));
+
+    // Remove stale popups.
+    this.popupNodes = this.popupNodes.filter(n => next.has(n.linkId));
+
+    // Add missing popups.
+    for (const linkId of next) {
+      if (existingByLinkId.has(linkId)) continue;
+
+      const midpoint = this.getLinkWorldMidpoint(linkId);
+      this.popupNodes.push({
+        id: `popup:${linkId}`,
+        kind: 'popup',
+        linkId,
+        x: midpoint?.x ?? this.width / 2,
+        y: midpoint?.y ?? this.height / 2,
+        fx: null,
+        fy: null,
+      });
+    }
+
+    this.syncSimulationNodes();
+    this.updatePopups();
+    this.simulation.alpha(0.65).restart();
+  }
+
+  private getLinkWorldMidpoint(linkId: string): { x: number; y: number } | null {
+    const link = this.links.find(l => l.id === linkId);
+    if (!link) return null;
+    const source = link.source as any;
+    const target = link.target as any;
+    if (source?.x === undefined || source?.y === undefined || target?.x === undefined || target?.y === undefined) return null;
+    return { x: (source.x + target.x) / 2, y: (source.y + target.y) / 2 };
+  }
+
+  private updatePopups() {
+    const scale = Math.min(1.2, Math.max(0.85, this.nodeSizeScale));
+    const width = Math.round(300 * scale);
+    const height = Math.round(124 * scale);
+    const radius = Math.round(16 * scale);
+
+    const popups = this.popupsGroup
+      .selectAll<SVGGElement, PopupNode>('g.popup')
+      .data(this.popupNodes, (d: any) => d.id);
+
+    const enter = popups.enter()
+      .append('g')
+      .attr('class', 'popup')
+      .style('pointer-events', 'all')
+      .style('cursor', 'default')
+      .on('click', (event) => event.stopPropagation());
+
+    enter.append('path')
+      .attr('class', 'tail')
+      .attr('fill', 'rgba(17, 24, 39, 0.92)')
+      .attr('stroke', 'rgba(34, 211, 238, 0.35)')
+      .attr('stroke-width', 1.5);
+
+    enter.append('rect')
+      .attr('class', 'body')
+      .attr('x', -width / 2)
+      .attr('y', -height / 2)
+      .attr('width', width)
+      .attr('height', height)
+      .attr('rx', radius)
+      .attr('ry', radius)
+      .attr('fill', 'rgba(17, 24, 39, 0.92)')
+      .attr('stroke', 'rgba(34, 211, 238, 0.35)')
+      .attr('stroke-width', 1.5);
+
+    enter.append('text')
+      .attr('class', 'title')
+      .attr('x', -width / 2 + 14)
+      .attr('y', -height / 2 + 22)
+      .attr('fill', '#e5e7eb')
+      .attr('font-size', Math.round(12 * scale))
+      .attr('font-weight', 700);
+
+    enter.append('text')
+      .attr('class', 'snippet')
+      .attr('x', -width / 2 + 14)
+      .attr('y', -height / 2 + 44)
+      .attr('fill', '#cbd5e1')
+      .attr('font-size', Math.round(10 * scale))
+      .attr('font-style', 'italic');
+
+    const loading = enter.append('g').attr('class', 'loading');
+    loading.append('circle')
+      .attr('cx', -width / 2 + 20)
+      .attr('cy', -height / 2 + 70)
+      .attr('r', Math.round(7 * scale))
+      .attr('fill', 'none')
+      .attr('stroke', 'rgba(34, 211, 238, 0.9)')
+      .attr('stroke-width', 2.5)
+      .attr('stroke-dasharray', '10 6')
+      .append('animateTransform')
+      .attr('attributeName', 'transform')
+      .attr('type', 'rotate')
+      .attr('from', `0 ${-width / 2 + 20} ${-height / 2 + 70}`)
+      .attr('to', `360 ${-width / 2 + 20} ${-height / 2 + 70}`)
+      .attr('dur', '1s')
+      .attr('repeatCount', 'indefinite');
+
+    const shimmer = loading.append('g').attr('class', 'shimmer');
+    const shimmerLines = [
+      { y: -height / 2 + 62, w: 0.78 },
+      { y: -height / 2 + 78, w: 0.92 },
+      { y: -height / 2 + 94, w: 0.62 },
+    ];
+    shimmerLines.forEach(line => {
+      shimmer.append('rect')
+        .attr('x', -width / 2 + 38)
+        .attr('y', line.y)
+        .attr('width', Math.round((width - 60) * line.w))
+        .attr('height', Math.round(8 * scale))
+        .attr('rx', Math.round(4 * scale))
+        .attr('fill', 'rgba(148, 163, 184, 0.25)')
+        .append('animate')
+        .attr('attributeName', 'opacity')
+        .attr('values', '0.25;0.55;0.25')
+        .attr('dur', '1.1s')
+        .attr('repeatCount', 'indefinite');
+    });
+
+    const close = enter.append('g')
+      .attr('class', 'close')
+      .style('cursor', 'pointer')
+      .on('click', (event, d) => {
+        event.stopPropagation();
+        this.callbacks.onLinkPopupClose?.(d.linkId);
+      });
+
+    close.append('circle')
+      .attr('cx', width / 2 - 16)
+      .attr('cy', -height / 2 + 16)
+      .attr('r', Math.round(10 * scale))
+      .attr('fill', 'rgba(0, 0, 0, 0.35)')
+      .attr('stroke', 'rgba(34, 211, 238, 0.4)')
+      .attr('stroke-width', 1);
+
+    close.append('text')
+      .attr('x', width / 2 - 16)
+      .attr('y', -height / 2 + 20)
+      .attr('text-anchor', 'middle')
+      .attr('fill', '#e5e7eb')
+      .attr('font-size', Math.round(14 * scale))
+      .attr('font-weight', 700)
+      .text('×');
+
+    const merged = enter.merge(popups as any);
+
+    merged.select<SVGRectElement>('rect.body')
+      .attr('x', -width / 2)
+      .attr('y', -height / 2)
+      .attr('width', width)
+      .attr('height', height)
+      .attr('rx', radius)
+      .attr('ry', radius);
+
+    merged.select<SVGTextElement>('text.title')
+      .attr('x', -width / 2 + 14)
+      .attr('y', -height / 2 + 22);
+
+    merged.select<SVGTextElement>('text.snippet')
+      .attr('x', -width / 2 + 14)
+      .attr('y', -height / 2 + 44);
+
+    merged.select<SVGGElement>('g.close').select('circle')
+      .attr('cx', width / 2 - 16)
+      .attr('cy', -height / 2 + 16)
+      .attr('r', Math.round(10 * scale));
+
+    merged.select<SVGGElement>('g.close').select('text')
+      .attr('x', width / 2 - 16)
+      .attr('y', -height / 2 + 20)
+      .attr('font-size', Math.round(14 * scale));
+
+    merged.each((d, i, nodes) => {
+      const link = this.getLinkById(d.linkId);
+      const group = d3.select(nodes[i]);
+      const title = (() => {
+        if (!link) return 'Connection';
+        const source = typeof link.source === 'object' ? (link.source as any).title : link.source;
+        const target = typeof link.target === 'object' ? (link.target as any).title : link.target;
+        const isIncoming = typeof link.type === 'string' && link.type.includes('backlink');
+        return `${source} ${isIncoming ? '→' : '↔'} ${target}`;
+      })();
+
+      const snippet = link?.context ? link.context : '';
+      const clipped = snippet.length > 140 ? `${snippet.slice(0, 137)}...` : snippet;
+      group.select<SVGTextElement>('text.title').text(title);
+      group.select<SVGTextElement>('text.snippet').text(clipped ? `"${clipped}"` : '');
+      group.select<SVGGElement>('g.loading').attr('display', clipped ? 'none' : null);
+    });
+
+    popups.exit().remove();
+  }
+
+  private updatePopupPositions() {
+    if (this.popupNodes.length === 0) return;
+    const offset = 52 * this.nodeSizeScale;
+
+    for (const popup of this.popupNodes) {
+      const link = this.getLinkById(popup.linkId);
+      if (!link) continue;
+
+      const source = link.source as any;
+      const target = link.target as any;
+      if (source?.x === undefined || source?.y === undefined || target?.x === undefined || target?.y === undefined) continue;
+
+      const midX = (source.x + target.x) / 2;
+      const midY = (source.y + target.y) / 2;
+
+      const dx = target.x - source.x;
+      const dy = target.y - source.y;
+      const len = Math.sqrt(dx * dx + dy * dy) || 1;
+      const nx = -dy / len;
+      const ny = dx / len;
+
+      const bodyX = midX + nx * offset;
+      const bodyY = midY + ny * offset;
+
+      popup.anchorX = midX;
+      popup.anchorY = midY;
+      popup.fx = bodyX;
+      popup.fy = bodyY;
+      popup.x = bodyX;
+      popup.y = bodyY;
+    }
+
+    const scale = Math.min(1.2, Math.max(0.85, this.nodeSizeScale));
+    const width = Math.round(300 * scale);
+    const height = Math.round(124 * scale);
+
+    this.popupsGroup.selectAll<SVGGElement, PopupNode>('g.popup')
+      .attr('transform', (d: any) => `translate(${d.x ?? 0},${d.y ?? 0})`)
+      .each((d, i, nodes) => {
+        const ax = (d.anchorX ?? 0) - (d.x ?? 0);
+        const ay = (d.anchorY ?? 0) - (d.y ?? 0);
+
+        const halfW = width / 2;
+        const halfH = height / 2;
+        const denom = Math.max(Math.abs(ax) / (halfW || 1), Math.abs(ay) / (halfH || 1), 1);
+        const bx = ax / denom;
+        const by = ay / denom;
+        const mx = (bx + ax) / 2;
+        const my = (by + ay) / 2;
+
+        d3.select(nodes[i]).select<SVGPathElement>('path.tail')
+          .attr('d', `M ${bx} ${by} Q ${mx} ${my} ${ax} ${ay}`);
+      });
   }
 
   private updateNodes() {
@@ -1172,21 +1480,33 @@ export class GraphManager {
     if (meta.isCurrentlyExploring) return '#ffdd00'; // Yellow for currently exploring
     if (meta.isPathEndpoint) return '#ff8800'; // Orange for selected path endpoints
     if (meta.isBulkSelected) return '#ff8800'; // Orange for bulk-selected
-    if (meta.isUserTyped) return '#0088ff'; // Blue for user-typed (fallback)
+    if (meta.originSeed) {
+      const depth = Math.max(0, Math.min(12, meta.originDepth ?? 0));
+      const hueOffset = depth * 14;
+      const saturation = Math.max(0.42, 0.78 - depth * 0.045);
+      const lightness = Math.max(0.34, 0.56 - depth * 0.02);
+      return this.hashColor(meta.originSeed, saturation, lightness, hueOffset);
+    }
+    if (meta.isUserTyped) return '#0088ff'; // Fallback
     if (meta.isAutoDiscovered && meta.colorSeed) return this.hashColor(meta.colorSeed, 0.62); // Cluster by description
     if (meta.isAutoDiscovered) return '#9966ff'; // Purple for auto-discovered (fallback)
     return '#0088ff'; // Default blue (fallback)
   }
 
-  private hashColor(seed: string, saturation: number = 0.65, lightness: number = 0.52): string {
+  private hashColor(seed: string, saturation: number = 0.65, lightness: number = 0.52, hueOffset: number = 0): string {
     let hash = 0;
     for (let i = 0; i < seed.length; i++) {
       hash = ((hash << 5) - hash + seed.charCodeAt(i)) | 0;
     }
-    const hue = Math.abs(hash) % 360;
+    const hue = (Math.abs(hash) + hueOffset) % 360;
     const s = Math.round(saturation * 100);
     const l = Math.round(lightness * 100);
     return `hsl(${hue}, ${s}%, ${l}%)`;
+  }
+
+  getNodeMetadata(nodeId: string): NodeMetadata | undefined {
+    const meta = this.nodeMetadata.get(nodeId);
+    return meta ? { ...meta } : undefined;
   }
 
   private getNodeStroke(meta: Partial<NodeMetadata>): string {
@@ -1316,6 +1636,9 @@ export class GraphManager {
     // Update node positions
     this.nodesGroup.selectAll('g.node')
       .attr('transform', (d: any) => `translate(${d.x},${d.y})`);
+
+    // Update popup anchors/positions (repels nodes via collision)
+    this.updatePopupPositions();
   }
 
   private sanitizeId(id: string): string {

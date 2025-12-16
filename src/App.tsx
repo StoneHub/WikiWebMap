@@ -6,7 +6,6 @@ import './index.css';
 import { SearchOverlay } from './components/SearchOverlay';
 import { GraphControls } from './components/GraphControls';
 import { NodeDetailsPanel } from './components/NodeDetailsPanel';
-import { LinkContextsLayer } from './components/LinkContextsLayer';
 import { SearchStatusOverlay } from './components/SearchStatusOverlay';
 import { LensingGridBackground } from './components/LensingGridBackground';
 import type { SearchProgress } from './types/SearchProgress';
@@ -43,7 +42,6 @@ const WikiWebExplorer = () => {
 
   // Link Context State
   const [activeLinkContexts, setActiveLinkContexts] = useState<Set<string>>(new Set());
-  const [linkContextPositions, setLinkContextPositions] = useState<Record<string, { x: number, y: number }>>({});
 
   // Search Progress State
   const [searchProgress, setSearchProgress] = useState<SearchProgress>({
@@ -89,8 +87,6 @@ const WikiWebExplorer = () => {
   const keepSearchingRef = useRef(false);
   const isRunningSearchRef = useRef(false);
   const animationFrameRef = useRef<number>();
-  const activeLinkContextsRef = useRef<Set<string>>(new Set());
-  const linkContextPositionsRef = useRef<Record<string, { x: number; y: number }>>({});
   const searchDockLinkIdRef = useRef<string | null>(null);
   const mutationEpochRef = useRef(0);
   const searchDebounceTimeoutRef = useRef<number | null>(null);
@@ -230,14 +226,6 @@ const WikiWebExplorer = () => {
   }, []);
 
   useEffect(() => {
-    activeLinkContextsRef.current = activeLinkContexts;
-  }, [activeLinkContexts]);
-
-  useEffect(() => {
-    linkContextPositionsRef.current = linkContextPositions;
-  }, [linkContextPositions]);
-
-  useEffect(() => {
     searchDockLinkIdRef.current = searchDockLinkId;
   }, [searchDockLinkId]);
 
@@ -262,6 +250,14 @@ const WikiWebExplorer = () => {
       onBackgroundClick: () => {
         graphManagerRef.current?.highlightNode(null);
         setClickedNode(null);
+        setActiveLinkContexts(new Set());
+      },
+      onLinkPopupClose: (linkId) => {
+        setActiveLinkContexts(prev => {
+          const next = new Set(prev);
+          next.delete(linkId);
+          return next;
+        });
       },
       onSelectionChange: (nodes) => setBulkSelectedNodes(nodes),
       onLinksApplied: ({ added, updated }) => {
@@ -288,45 +284,16 @@ const WikiWebExplorer = () => {
 
     updateQueueRef.current = new UpdateQueue(graphManagerRef.current, 500);
 
-    // Start tracking loop for link popups + docked search dialog
-    const trackPopups = () => {
-      const activeIds = activeLinkContextsRef.current;
+    // Start tracking loop for docked search dialog position.
+    const trackDock = () => {
       const dockLinkId = searchDockLinkIdRef.current;
-
-      if ((activeIds.size > 0 || dockLinkId) && graphManagerRef.current) {
-        const newPositions: Record<string, { x: number, y: number }> = {};
-        let hasChanges = false;
-
-        activeIds.forEach(linkId => {
-          const pos = graphManagerRef.current!.getLinkScreenCoordinates(linkId);
-          if (pos) {
-            newPositions[linkId] = pos;
-            if (
-              !linkContextPositionsRef.current[linkId] ||
-              Math.abs(linkContextPositionsRef.current[linkId].x - pos.x) > 1 ||
-              Math.abs(linkContextPositionsRef.current[linkId].y - pos.y) > 1
-            ) {
-              hasChanges = true;
-            }
-          }
-        });
-
-        if (hasChanges) {
-          setLinkContextPositions(prev => {
-            const next = { ...prev, ...newPositions };
-            linkContextPositionsRef.current = next;
-            return next;
-          });
-        }
-
-        if (dockLinkId) {
-          const pos = graphManagerRef.current!.getLinkScreenCoordinates(dockLinkId);
-          if (pos) setSearchDockPosition(pos);
-        }
+      if (dockLinkId && graphManagerRef.current) {
+        const pos = graphManagerRef.current.getLinkScreenCoordinates(dockLinkId);
+        if (pos) setSearchDockPosition(pos);
       }
-      animationFrameRef.current = requestAnimationFrame(trackPopups);
+      animationFrameRef.current = requestAnimationFrame(trackDock);
     };
-    trackPopups();
+    trackDock();
 
     return () => {
       if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
@@ -499,12 +466,20 @@ const WikiWebExplorer = () => {
 
       setUserTypedNodes(prev => new Set([...prev, resolvedTitle]));
 
-      const newNodes: GraphNode[] = [{ id: resolvedTitle, title: resolvedTitle }];
+      const newNodes: GraphNode[] = [{
+        id: resolvedTitle,
+        title: resolvedTitle,
+        metadata: { originSeed: resolvedTitle, originDepth: 0, colorRole: 'root' }
+      }];
       const newLinks: Link[] = [];
       const newAutoDiscovered = new Set<string>();
 
       links.forEach((linkObj: LinkWithContext) => {
-        newNodes.push({ id: linkObj.title, title: linkObj.title });
+        newNodes.push({
+          id: linkObj.title,
+          title: linkObj.title,
+          metadata: { originSeed: resolvedTitle, originDepth: 1, colorRole: 'child' }
+        });
         newAutoDiscovered.add(linkObj.title);
         newLinks.push({
           source: resolvedTitle,
@@ -517,7 +492,11 @@ const WikiWebExplorer = () => {
 
       backlinks.forEach((blTitle: string) => {
         if (!blTitle || blTitle === resolvedTitle) return;
-        newNodes.push({ id: blTitle, title: blTitle });
+        newNodes.push({
+          id: blTitle,
+          title: blTitle,
+          metadata: { originSeed: resolvedTitle, originDepth: 1, colorRole: 'child' }
+        });
         newAutoDiscovered.add(blTitle);
         newLinks.push({
           source: blTitle,
@@ -804,6 +783,9 @@ const WikiWebExplorer = () => {
       pushHistory();
 
       const gm = graphManagerRef.current;
+      const originMeta = gm?.getNodeMetadata(title);
+      const originSeed = originMeta?.originSeed || title;
+      const originDepthBase = originMeta?.originDepth ?? 0;
       const existingGraphNodeIds = new Set(gm?.getNodeIds() || []);
 
       if (categories.length > 0) setNodeCategories(prev => ({ ...prev, [title]: categories }));
@@ -877,7 +859,11 @@ const WikiWebExplorer = () => {
 
       sortedCandidates.forEach(c => {
         const candidateTitle = c.title;
-        nodesToAdd.push({ id: candidateTitle, title: candidateTitle });
+        nodesToAdd.push({
+          id: candidateTitle,
+          title: candidateTitle,
+          metadata: { originSeed, originDepth: originDepthBase + 1, colorRole: 'child' }
+        });
         newAutoDiscovered.add(candidateTitle);
 
         if (c.direction === 'out') {
@@ -1043,6 +1029,10 @@ const WikiWebExplorer = () => {
     graphManagerRef.current?.setPathHighlight(pathNodes.size > 0 ? pathNodes : null);
   }, [pathNodes]);
 
+  useEffect(() => {
+    graphManagerRef.current?.setActiveLinkPopups(Array.from(activeLinkContexts));
+  }, [activeLinkContexts]);
+
   return (
     <div className="w-screen h-screen bg-gray-900 text-white relative overflow-hidden font-sans">
       <div className="absolute inset-0 z-0">
@@ -1128,21 +1118,6 @@ const WikiWebExplorer = () => {
         onExpand={expandNode}
         onPruneLeaves={pruneLeafNodes}
         onDelete={deleteNodeImperative}
-      />
-
-      {/* Attached Link Contexts */}
-      <LinkContextsLayer
-        activeLinkIds={Array.from(activeLinkContexts)}
-        positions={linkContextPositions}
-        getLinkById={(linkId) => graphManagerRef.current?.getLinkById(linkId)}
-        scale={nodeSizeScale}
-        onCloseLinkId={(linkId) =>
-          setActiveLinkContexts(prev => {
-            const n = new Set(prev);
-            n.delete(linkId);
-            return n;
-          })
-        }
       />
 
       {/* Connection Analytics */}
