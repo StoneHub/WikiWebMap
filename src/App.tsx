@@ -17,9 +17,11 @@ import { connectionLogger } from './ConnectionLogger';
 import { RecaptchaService } from './services/RecaptchaService';
 import { useGraphState } from './hooks/useGraphState';
 import { Legend } from './components/Legend';
+import { XRStage } from './components/XR/XRStage';
 
 const WikiWebExplorer = () => {
   // --- Graph State Hook ---
+  const graphState = useGraphState(); // Capture full object
   const {
     graphManagerRef,
     updateQueueRef,
@@ -147,6 +149,8 @@ const WikiWebExplorer = () => {
   useEffect(() => {
     searchQueueRef.current = searchQueue;
   }, [searchQueue]);
+
+  const [showXR, setShowXR] = useState(false);
 
   // --- Effects & Logic ---
 
@@ -640,6 +644,18 @@ const WikiWebExplorer = () => {
         <LensingGridBackground graphManagerRef={graphManagerRef} />
         <svg ref={svgRef} className="w-full h-full" />
       </div>
+
+      {/* XR Toggle */}
+      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 bg-gray-800/80 backdrop-blur rounded-full px-4 py-2 flex items-center gap-2 border border-gray-700">
+        <button
+          onClick={() => setShowXR(!showXR)}
+          className={`px-3 py-1 rounded-full text-sm font-bold transition-colors ${showXR ? 'bg-purple-600 text-white shadow-[0_0_10px_#9333ea]' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+        >
+          {showXR ? 'Exit Hologram' : 'Enter Hologram Mode'}
+        </button>
+      </div>
+
+      {showXR && <XRStage graphState={graphState} />}
 
       <SearchOverlay
         searchTerm={searchTerm}

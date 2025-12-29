@@ -659,6 +659,14 @@ export class GraphManager {
     }).length;
   }
 
+  getNodes() {
+    return this.nodes;
+  }
+
+  getLinks() {
+    return this.links;
+  }
+
   getStateSnapshot(): GraphStateSnapshot {
     const nodes = this.nodes.map(n => ({ ...n }));
     const links = this.links.map(l => {
