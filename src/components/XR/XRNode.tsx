@@ -1,10 +1,10 @@
-import React, { useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { Text } from '@react-three/drei';
+import { Text, Billboard } from '@react-three/drei';
 import * as THREE from 'three';
 
 type XRNodeProps = {
-    id: string;
+    // id prop removed as it was unused, but keeping title, position etc.
     title: string;
     position: THREE.Vector3;
     velocity: THREE.Vector3;
@@ -12,12 +12,12 @@ type XRNodeProps = {
     onClick: () => void;
 };
 
-export const XRNode = ({ id, title, position, velocity, color = '#0088ff', onClick }: XRNodeProps) => {
+export const XRNode = ({ title, position, velocity, color = '#0088ff', onClick }: XRNodeProps) => {
     const meshRef = useRef<THREE.Mesh>(null);
     const [hovered, setHover] = useState(false);
 
     // Smooth interpolation for position updates from the physics engine
-    useFrame((state, delta) => {
+    useFrame((_state, delta) => {
         if (meshRef.current) {
             // Lerp towards current physics position with a bit of lag for smoothness
             meshRef.current.position.lerp(position, 10 * delta);
@@ -55,18 +55,17 @@ export const XRNode = ({ id, title, position, velocity, color = '#0088ff', onCli
                 />
             </mesh>
 
-            {/* Floating Label */}
-            <mesh position={[position.x, position.y + 0.15, position.z]}>
+            {/* Floating Label - using Billboard component instead of prop */}
+            <Billboard position={[position.x, position.y + 0.15, position.z]}>
                 <Text
                     fontSize={0.08}
                     color="white"
                     anchorX="center"
                     anchorY="middle"
-                    billboard
                 >
                     {title}
                 </Text>
-            </mesh>
+            </Billboard>
         </group>
     );
 };

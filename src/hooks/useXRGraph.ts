@@ -61,7 +61,7 @@ export const useXRGraph = (graphState: ReturnType<typeof useGraphState>) => {
     }, [graphManagerRef.current?.getNodes().length]); // Simple dependency on count for now
 
     // Physics Loop (Force Directed Graph in 3D)
-    useFrame((state, delta) => {
+    useFrame((_state, delta) => {
         const nodes = Array.from(xrNodes.current.values());
         const links = graphManagerRef.current?.getLinks() || [];
 

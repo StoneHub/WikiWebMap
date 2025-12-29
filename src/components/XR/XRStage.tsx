@@ -1,11 +1,10 @@
-import React from 'react';
 import { Canvas } from '@react-three/fiber';
 import { XR, createXRStore } from '@react-three/xr';
 import { OrbitControls, Stars } from '@react-three/drei';
 import { useGraphState } from '../../hooks/useGraphState';
 import { useXRGraph } from '../../hooks/useXRGraph';
 import { XRNode } from './XRNode';
-import * as THREE from 'three';
+import { XRLinks } from './XRLinks';
 
 const store = createXRStore();
 
@@ -14,7 +13,8 @@ type XRStageContentProps = {
 };
 
 const XRStageContent = ({ graphState }: XRStageContentProps) => {
-    const { xrNodes } = useXRGraph(graphState);
+    const xrGraph = useXRGraph(graphState);
+    const { xrNodes } = xrGraph;
 
     return (
         <>
@@ -22,11 +22,12 @@ const XRStageContent = ({ graphState }: XRStageContentProps) => {
             <pointLight position={[10, 10, 10]} intensity={1} />
             <Stars radius={100} depth={50} count={5000} factor={4} saturation={0} fade speed={1} />
 
+            <XRLinks graphState={graphState} xrGraph={xrGraph} />
+
             {/* Render Nodes */}
             {Array.from(xrNodes.values()).map(node => (
                 <XRNode
                     key={node.id}
-                    id={node.id}
                     title={node.id} // Or look up title if different
                     position={node.position}
                     velocity={node.velocity}
@@ -47,9 +48,9 @@ const XRStageContent = ({ graphState }: XRStageContentProps) => {
 
 export const XRStage = ({ graphState }: XRStageContentProps) => {
     return (
-        <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 50 }}>
+        <div className="absolute top-0 left-0 w-full h-full z-50">
             {/* VR Button Overlay */}
-            <div style={{ position: 'absolute', top: '20px', left: '50%', transform: 'translateX(-50%)', zIndex: 100 }}>
+            <div className="absolute top-5 left-1/2 -translate-x-1/2 z-[100]">
                 <button
                     onClick={() => store.enterAR()}
                     className="px-4 py-2 bg-blue-600 rounded text-white font-bold hover:bg-blue-500 transition-colors mr-2"
