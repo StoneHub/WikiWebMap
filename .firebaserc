@@ -1,5 +1,15 @@
 {
   "projects": {
     "default": "possible-haven-471616-f0"
-  }
+  },
+  "targets": {
+    "possible-haven-471616-f0": {
+      "hosting": {
+        "wiki-map": [
+          "wikiconnectionsmap"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }

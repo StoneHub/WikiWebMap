@@ -1,6 +1,6 @@
 {
     "hosting": {
-        "site": "wikiconnectionsmap",
+        "target": "wiki-map",
         "public": "dist",
         "ignore": [
             "firebase.json",
