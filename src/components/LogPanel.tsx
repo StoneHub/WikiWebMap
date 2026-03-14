@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { connectionLogger, ConnectionLog } from '../ConnectionLogger';
+import { clientErrorReporter, type ClientErrorRecord } from '../services/ClientErrorReporter';
 
 interface LogPanelProps {
     isOpen: boolean;
@@ -8,12 +9,14 @@ interface LogPanelProps {
 
 const LogPanel = ({ isOpen, onClose }: LogPanelProps) => {
     const [logs, setLogs] = useState<ConnectionLog[]>([]);
+    const [runtimeErrors, setRuntimeErrors] = useState<ClientErrorRecord[]>([]);
     const [autoRefresh, setAutoRefresh] = useState(true);
     const [confirmClear, setConfirmClear] = useState(false);
     const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
     const refreshLogs = () => {
         setLogs([...connectionLogger.getLogs()].reverse()); // Show newest first
+        setRuntimeErrors(clientErrorReporter.getErrors());
     };
 
     useEffect(() => {
@@ -39,16 +42,20 @@ const LogPanel = ({ isOpen, onClose }: LogPanelProps) => {
 
     const handleClear = () => {
         connectionLogger.clearLogs();
+        clientErrorReporter.clear();
         refreshLogs();
         setConfirmClear(false);
-        setStatusMessage('Connection logs cleared.');
+        setStatusMessage('Connection logs and runtime errors cleared.');
     };
 
     const handleCopyJson = async () => {
         try {
-            const dump = JSON.stringify(connectionLogger.getLogs(), null, 2);
+            const dump = JSON.stringify({
+                connectionLogs: connectionLogger.getLogs(),
+                runtimeErrors: clientErrorReporter.getErrors(),
+            }, null, 2);
             await navigator.clipboard.writeText(dump);
-            setStatusMessage('Session logs copied to the clipboard.');
+            setStatusMessage('Session diagnostics copied to the clipboard.');
         } catch {
             setStatusMessage('Clipboard copy failed. Try exporting the CSV instead.');
         }
@@ -61,7 +68,9 @@ const LogPanel = ({ isOpen, onClose }: LogPanelProps) => {
     return (
         <div className="fixed bottom-20 right-3 sm:bottom-24 sm:right-6 w-[calc(100vw-1.5rem)] sm:w-96 bg-gray-900/95 backdrop-blur-md border border-gray-700 rounded-lg shadow-2xl z-50 flex flex-col max-h-[60vh] sm:max-h-[520px]">
             <div className="flex items-center justify-between p-3 border-b border-gray-700 bg-gray-800 rounded-t-lg">
-                <h3 className="font-bold text-gray-200">Connection Logs ({logs.length})</h3>
+                <h3 className="font-bold text-gray-200">
+                    Session Diagnostics ({logs.length} links / {runtimeErrors.length} errors)
+                </h3>
                 <div className="flex gap-2">
                     <button
                         onClick={onClose}
@@ -101,7 +110,7 @@ const LogPanel = ({ isOpen, onClose }: LogPanelProps) => {
                     <button
                         onClick={() => void handleCopyJson()}
                         className="text-xs px-2 py-1 bg-gray-600 text-white hover:bg-gray-700 rounded"
-                        title="Copy session data to clipboard for analysis"
+                        title="Copy session diagnostics to clipboard for analysis"
                     >
                         Copy JSON
                     </button>
@@ -111,7 +120,7 @@ const LogPanel = ({ isOpen, onClose }: LogPanelProps) => {
                 <div className="border-b border-gray-700 bg-gray-900/80 px-3 py-2 text-xs">
                     {confirmClear ? (
                         <div className="flex items-center justify-between gap-3 text-gray-200">
-                            <span>Clear all connection logs for this browser session?</span>
+                            <span>Clear all connection logs and runtime errors for this browser session?</span>
                             <div className="flex gap-2">
                                 <button
                                     onClick={() => setConfirmClear(false)}
@@ -142,45 +151,86 @@ const LogPanel = ({ isOpen, onClose }: LogPanelProps) => {
             )}
 
             <div className="flex-1 overflow-auto p-0 font-mono text-xs">
-                <table className="w-full text-left border-collapse">
-                    <thead className="bg-gray-800 sticky top-0">
-                        <tr>
-                            <th className="p-2 text-gray-500 font-medium">Time</th>
-                            <th className="p-2 text-gray-500 font-medium">Source → Target</th>
-                            <th className="p-2 text-gray-500 font-medium">Type</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {logs.map(log => (
-                            <tr key={log.id} className="border-b border-gray-800 hover:bg-gray-800/50 text-gray-300">
-                                <td className="p-2 whitespace-nowrap text-gray-500">
-                                    {new Date(log.timestamp).toLocaleTimeString()}
-                                </td>
-                                <td className="p-2">
-                                    <span className="text-blue-400">{log.source}</span>
-                                    <span className="text-gray-600 mx-1">→</span>
-                                    <span className="text-green-400">{log.target}</span>
-                                </td>
-                                <td className="p-2">
-                                    <span className={`px-1 rounded ${log.type === 'manual' ? 'bg-blue-900 text-blue-300' :
-                                        log.type === 'path' ? 'bg-purple-900 text-purple-300' :
-                                        log.type.includes('backlink') ? 'bg-orange-900 text-orange-300' :
-                                            'bg-gray-700 text-gray-300'
-                                        }`}>
-                                        {log.type}
-                                    </span>
-                                </td>
-                            </tr>
-                        ))}
-                        {logs.length === 0 && (
+                <div className="border-b border-gray-800">
+                    <div className="sticky top-0 bg-gray-800 px-3 py-2 text-[11px] uppercase tracking-widest text-gray-400">
+                        Connection Logs
+                    </div>
+                    <table className="w-full text-left border-collapse">
+                        <thead className="bg-gray-800/70 sticky top-[32px]">
                             <tr>
-                                <td colSpan={3} className="p-4 text-center text-gray-500">
-                                    No logs yet. Explore the graph to generate logs.
-                                </td>
+                                <th className="p-2 text-gray-500 font-medium">Time</th>
+                                <th className="p-2 text-gray-500 font-medium">Source → Target</th>
+                                <th className="p-2 text-gray-500 font-medium">Type</th>
                             </tr>
-                        )}
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                            {logs.map(log => (
+                                <tr key={log.id} className="border-b border-gray-800 hover:bg-gray-800/50 text-gray-300">
+                                    <td className="p-2 whitespace-nowrap text-gray-500">
+                                        {new Date(log.timestamp).toLocaleTimeString()}
+                                    </td>
+                                    <td className="p-2">
+                                        <span className="text-blue-400">{log.source}</span>
+                                        <span className="text-gray-600 mx-1">→</span>
+                                        <span className="text-green-400">{log.target}</span>
+                                    </td>
+                                    <td className="p-2">
+                                        <span className={`px-1 rounded ${log.type === 'manual' ? 'bg-blue-900 text-blue-300' :
+                                            log.type === 'path' ? 'bg-purple-900 text-purple-300' :
+                                            log.type.includes('backlink') ? 'bg-orange-900 text-orange-300' :
+                                                'bg-gray-700 text-gray-300'
+                                            }`}>
+                                            {log.type}
+                                        </span>
+                                    </td>
+                                </tr>
+                            ))}
+                            {logs.length === 0 && (
+                                <tr>
+                                    <td colSpan={3} className="p-4 text-center text-gray-500">
+                                        No connection logs yet. Explore the graph to generate them.
+                                    </td>
+                                </tr>
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div>
+                    <div className="sticky top-[61px] bg-gray-800 px-3 py-2 text-[11px] uppercase tracking-widest text-gray-400">
+                        Runtime Errors
+                    </div>
+                    {runtimeErrors.length === 0 ? (
+                        <div className="p-4 text-gray-500">No runtime errors captured in this session.</div>
+                    ) : (
+                        <div className="divide-y divide-gray-800">
+                            {runtimeErrors.map(error => (
+                                <div key={error.id} className="px-3 py-3 text-gray-300">
+                                    <div className="flex items-center justify-between gap-3">
+                                        <div className="font-semibold text-red-300">{error.message}</div>
+                                        <div className="shrink-0 text-[11px] text-gray-500">
+                                            {new Date(error.timestamp).toLocaleTimeString()}
+                                        </div>
+                                    </div>
+                                    <div className="mt-1 text-[11px] text-gray-500">
+                                        {error.source}
+                                        {error.url ? ` · ${error.url}` : ''}
+                                        {typeof error.line === 'number' ? `:${error.line}` : ''}
+                                        {typeof error.column === 'number' ? `:${error.column}` : ''}
+                                    </div>
+                                    {error.detail && (
+                                        <div className="mt-2 text-[11px] text-orange-200">{error.detail}</div>
+                                    )}
+                                    {error.stack && (
+                                        <pre className="mt-2 overflow-x-auto whitespace-pre-wrap rounded bg-black/30 p-2 text-[10px] text-gray-400">
+                                            {error.stack}
+                                        </pre>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
             </div>
         </div>
     );

@@ -15,6 +15,7 @@ import { SUGGESTED_PATHS, type SuggestedPath } from './data/suggestedPaths';
 import LogPanel from './components/LogPanel';
 import { connectionLogger } from './ConnectionLogger';
 import { RecaptchaService } from './services/RecaptchaService';
+import { clientErrorReporter } from './services/ClientErrorReporter';
 import { useGraphState, type AppSnapshot } from './hooks/useGraphState';
 import { runtimeConfig } from './config/runtimeConfig';
 
@@ -230,6 +231,47 @@ const WikiWebExplorer = () => {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [redo, undo]);
+
+  useEffect(() => {
+    const onWindowError = (event: ErrorEvent) => {
+      clientErrorReporter.report({
+        source: 'window.error',
+        message: event.message || 'Unhandled window error',
+        detail: event.error?.name,
+        stack: event.error?.stack,
+        url: event.filename,
+        line: event.lineno,
+        column: event.colno,
+      });
+    };
+
+    const onUnhandledRejection = (event: PromiseRejectionEvent) => {
+      const reason = event.reason;
+      if (reason instanceof Error) {
+        clientErrorReporter.report({
+          source: 'unhandledrejection',
+          message: reason.message,
+          detail: reason.name,
+          stack: reason.stack,
+        });
+        return;
+      }
+
+      clientErrorReporter.report({
+        source: 'unhandledrejection',
+        message: 'Unhandled promise rejection',
+        detail: typeof reason === 'string' ? reason : JSON.stringify(reason),
+      });
+    };
+
+    window.addEventListener('error', onWindowError);
+    window.addEventListener('unhandledrejection', onUnhandledRejection);
+
+    return () => {
+      window.removeEventListener('error', onWindowError);
+      window.removeEventListener('unhandledrejection', onUnhandledRejection);
+    };
+  }, []);
 
   useEffect(() => {
     searchDockLinkIdRef.current = searchDockLinkId;
@@ -647,6 +689,7 @@ const WikiWebExplorer = () => {
         restoreSearchSnapshotRef.current = true;
       }
     } catch (err: any) {
+      clientErrorReporter.reportError(err, 'Queued path search failed');
       restoreSearchSnapshotRef.current = true;
       setError(err?.message || 'Error during queued search');
     } finally {

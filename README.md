@@ -18,16 +18,20 @@ Live: `https://wikiconnectionsmap.web.app/`
 ### Build
 - `npm run build`
 
+### Test
+- `npm run test`
+
 ## Environment
 - Copy `.env.example` to `.env.local` for local overrides.
 - `VITE_WIKI_API_CONTACT_EMAIL` is used for the Wikipedia API identification header.
 - `VITE_RECAPTCHA_SITE_KEY` enables client-side bot checks when configured.
+- See `docs/env-inventory.md` for the release-facing env contract.
 
 ## Deployment
 - GitHub Actions validates pull requests and publishes Firebase preview channels before merge.
 - Merges to `main` deploy to Firebase Hosting live.
 - Bluehost is assumed to be used only for DNS or custom-domain management unless you have separate hosting outside this repo.
-- See `docs/deployment.md` and `docs/release-checklist.md` for release workflow details.
+- See `docs/deployment.md`, `docs/release-checklist.md`, and `docs/env-inventory.md` for release workflow details.
 
 ## Controls (high level)
 - Drag canvas to pan; scroll to zoom.
