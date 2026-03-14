@@ -8,9 +8,11 @@ interface NodeDetailsPanelProps {
     clickedCategories?: string[];
     clickedBacklinkCount?: number;
     nodeThumbnails: Record<string, string>;
+    isPathSelected: boolean;
+    pathSelectionCount: number;
     onClose: () => void;
     onExpand: (id: string) => void;
-    onPruneLeaves: () => void;
+    onTogglePathSelection: () => Promise<void>;
     onDelete: (id: string) => void;
 }
 
@@ -21,9 +23,11 @@ export const NodeDetailsPanel: React.FC<NodeDetailsPanelProps> = ({
     clickedCategories,
     clickedBacklinkCount,
     nodeThumbnails,
+    isPathSelected,
+    pathSelectionCount,
     onClose,
     onExpand,
-    onPruneLeaves,
+    onTogglePathSelection,
     onDelete,
 }) => {
     if (!clickedNode) return null;
@@ -31,9 +35,12 @@ export const NodeDetailsPanel: React.FC<NodeDetailsPanelProps> = ({
     const thumbnail = nodeThumbnails[clickedNode.title];
 
     return (
-        <div className="absolute top-6 right-6 z-30 w-80 max-w-[90vw]">
-            <div className="bg-gray-800/95 backdrop-blur-xl border border-gray-600/50 rounded-2xl shadow-2xl overflow-hidden flex flex-col animate-fade-in-right">
-                <div className="relative h-40 bg-gray-900 skeleton-loader">
+        <div className="fixed inset-x-0 bottom-0 z-30 sm:absolute sm:inset-auto sm:top-6 sm:right-6 sm:w-80 sm:max-w-[90vw]">
+            <div className="mx-3 mb-3 sm:mx-0 sm:mb-0 bg-gray-800/95 backdrop-blur-xl border border-gray-600/50 rounded-3xl sm:rounded-2xl shadow-2xl overflow-hidden flex max-h-[78vh] sm:max-h-none flex-col animate-fade-in-right">
+                <div className="flex justify-center py-2 sm:hidden">
+                    <div className="h-1.5 w-12 rounded-full bg-gray-500/50" />
+                </div>
+                <div className="relative h-36 sm:h-40 bg-gray-900 skeleton-loader">
                     {thumbnail ? (
                         <img
                             src={thumbnail}
@@ -65,7 +72,7 @@ export const NodeDetailsPanel: React.FC<NodeDetailsPanelProps> = ({
                     </button>
                 </div>
 
-                <div className="p-5">
+                <div className="overflow-y-auto p-5">
                     <h2 className="text-xl font-bold text-white mb-2 leading-tight">
                         {clickedNode.title}
                     </h2>
@@ -121,11 +128,17 @@ export const NodeDetailsPanel: React.FC<NodeDetailsPanelProps> = ({
                             Expand
                         </button>
                         <button
-                            onClick={onPruneLeaves}
-                            className="col-span-2 px-4 py-2 bg-gray-700/60 hover:bg-gray-600/60 rounded-xl text-xs font-medium transition text-gray-100 border border-gray-600/40"
-                            title="Remove all nodes with fewer than 2 connections"
+                            onClick={() => void onTogglePathSelection()}
+                            className={`col-span-2 px-4 py-2 rounded-xl text-xs font-medium transition border ${
+                                isPathSelected
+                                    ? 'bg-blue-500/15 border-blue-400/30 text-blue-100'
+                                    : 'bg-gray-700/60 hover:bg-gray-600/60 text-gray-100 border-gray-600/40'
+                            }`}
+                            title="Select this topic as one of two path endpoints"
                         >
-                            Prune Leaves (degree &lt; 2)
+                            {isPathSelected
+                                ? `Selected For Path (${pathSelectionCount}/2)`
+                                : `Select For Path (${pathSelectionCount}/2)`}
                         </button>
                     </div>
                     <button

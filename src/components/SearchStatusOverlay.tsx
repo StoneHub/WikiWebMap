@@ -19,6 +19,7 @@ export function SearchStatusOverlay(props: {
   isMinimized: boolean;
   onToggleMinimize: () => void;
   persistentVisible: boolean;
+  isTouchDevice: boolean;
   onOpenLogs?: () => void;
 }) {
   const renderQueue = () => {
@@ -175,11 +176,17 @@ export function SearchStatusOverlay(props: {
         <span>
           Connections: <strong className="text-gray-200">{props.linkCount}</strong>
         </span>
-        <span className="hidden sm:inline">
-          Path: <strong className="text-gray-200">Shift+Click</strong>
+        <span>
+          Path:{' '}
+          <strong className="text-gray-200">
+            {props.isTouchDevice ? 'Select In Details' : 'Shift+Click'}
+          </strong>
         </span>
-        <span className="hidden sm:inline">
-          Select: <strong className="text-gray-200">Alt+Drag</strong>
+        <span>
+          {props.isTouchDevice ? 'Delete selection:' : 'Select:'}{' '}
+          <strong className="text-gray-200">
+            {props.isTouchDevice ? 'Desktop only' : 'Alt+Drag'}
+          </strong>
         </span>
         {props.onOpenLogs && (
           <button

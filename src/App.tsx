@@ -15,18 +15,42 @@ import { SUGGESTED_PATHS, type SuggestedPath } from './data/suggestedPaths';
 import LogPanel from './components/LogPanel';
 import { connectionLogger } from './ConnectionLogger';
 import { RecaptchaService } from './services/RecaptchaService';
-import { useGraphState } from './hooks/useGraphState';
-import { Legend } from './components/Legend';
+import { useGraphState, type AppSnapshot } from './hooks/useGraphState';
+import { runtimeConfig } from './config/runtimeConfig';
+
+type SearchJob = {
+  id: string;
+  from: string;
+  to: string;
+  source: 'suggested' | 'shift';
+};
+
+type PinnedAction =
+  | { type: 'toggle'; id: string }
+  | { type: 'remove'; id: string }
+  | { type: 'select'; id: string | null }
+  | { type: 'clear' };
+
+const createDefaultSearchProgress = (): SearchProgress => ({
+  isSearching: false,
+  isPaused: false,
+  keepSearching: false,
+  currentDepth: 0,
+  maxDepth: 6,
+  currentPage: '',
+  exploredCount: 0,
+  queueSize: 0,
+  exploredNodes: new Set<string>(),
+});
 
 const WikiWebExplorer = () => {
   // --- Graph State Hook ---
   const {
     graphManagerRef,
     updateQueueRef,
-    mutationEpochRef,
     nodeCount, setNodeCount,
     linkCount, setLinkCount,
-    userTypedNodes, setUserTypedNodes,
+    userTypedNodes,
     autoDiscoveredNodes,
     expandedNodes,
     pathNodes, setPathNodes,
@@ -47,6 +71,9 @@ const WikiWebExplorer = () => {
     undo,
     redo,
     pushHistory,
+    captureSnapshot,
+    resetGraphState,
+    restoreSnapshot,
   } = useGraphState();
 
   // --- Search & UI State ---
@@ -62,10 +89,10 @@ const WikiWebExplorer = () => {
   const [, setActiveLinkContexts] = useState<Set<string>>(new Set());
   const [hoveredLinkId, setHoveredLinkId] = useState<string | null>(null);
   const [pinnedState, dispatchPinned] = useReducer(
-    (state: { ids: string[]; selectedId: string | null }, action: any) => {
+    (state: { ids: string[]; selectedId: string | null }, action: PinnedAction) => {
       switch (action.type) {
         case 'toggle': {
-          const id = action.id as string;
+          const id = action.id;
           const exists = state.ids.includes(id);
           const ids = exists ? state.ids.filter(x => x !== id) : [...state.ids, id];
           const selectedId = exists
@@ -74,14 +101,13 @@ const WikiWebExplorer = () => {
           return { ids, selectedId };
         }
         case 'remove': {
-          const id = action.id as string;
+          const id = action.id;
           const ids = state.ids.filter(x => x !== id);
           const selectedId = state.selectedId === id ? (ids.length > 0 ? ids[ids.length - 1] : null) : state.selectedId;
           return { ids, selectedId };
         }
         case 'select': {
-          const id = action.id as string | null;
-          return { ...state, selectedId: id };
+          return { ...state, selectedId: action.id };
         }
         case 'clear': {
           return { ids: [], selectedId: null };
@@ -95,27 +121,18 @@ const WikiWebExplorer = () => {
   const [, setLinkContextVersion] = useState(0);
 
   // Search Progress State
-  const [searchProgress, setSearchProgress] = useState<SearchProgress>({
-    isSearching: false,
-    isPaused: false,
-    keepSearching: false,
-    currentDepth: 0,
-    maxDepth: 6,
-    currentPage: '',
-    exploredCount: 0,
-    queueSize: 0,
-    exploredNodes: new Set<string>(),
-  });
+  const [searchProgress, setSearchProgress] = useState<SearchProgress>(createDefaultSearchProgress);
   const [searchLog, setSearchLog] = useState<string[]>([]);
   const [searchDockLinkId, setSearchDockLinkId] = useState<string | null>(null);
   const [searchDockPosition, setSearchDockPosition] = useState<{ x: number; y: number } | null>(null);
   const [foundPaths, setFoundPaths] = useState<Array<{ triggerLinkId: string; path: string[] }>>([]);
   const [keepSearching, setKeepSearching] = useState(false);
-  const [searchQueue, setSearchQueue] = useState<Array<{ id: string; from: string; to: string; source: 'suggested' | 'shift' }>>([]);
-  const searchQueueRef = useRef<Array<{ id: string; from: string; to: string; source: 'suggested' | 'shift' }>>([]);
-  const [activeSearch, setActiveSearch] = useState<{ id: string; from: string; to: string; source: 'suggested' | 'shift' } | null>(null);
+  const [searchQueue, setSearchQueue] = useState<SearchJob[]>([]);
+  const searchQueueRef = useRef<SearchJob[]>([]);
+  const [activeSearch, setActiveSearch] = useState<SearchJob | null>(null);
   const [searchTerminalMinimized, setSearchTerminalMinimized] = useState(false);
   const [logPanelOpen, setLogPanelOpen] = useState(false);
+  const [isTouchDevice, setIsTouchDevice] = useState(false);
 
   // Settings
   const [showSettings, setShowSettings] = useState(false);
@@ -125,7 +142,7 @@ const WikiWebExplorer = () => {
   });
   const [apiContactEmail, setApiContactEmail] = useState(() => {
     const fromStorage = localStorage.getItem('wikiApiContactEmail') || '';
-    const fromEnv = (import.meta.env.VITE_WIKI_API_CONTACT_EMAIL as string | undefined) || '';
+    const fromEnv = runtimeConfig.wikiApiContactEmail || '';
     return fromStorage || fromEnv;
   });
 
@@ -140,13 +157,20 @@ const WikiWebExplorer = () => {
   const searchPauseRef = useRef(false);
   const keepSearchingRef = useRef(false);
   const isRunningSearchRef = useRef(false);
+  const pathSelectedNodesRef = useRef<GraphNode[]>([]);
   const animationFrameRef = useRef<number>();
   const searchDockLinkIdRef = useRef<string | null>(null);
   const searchDebounceTimeoutRef = useRef<number | null>(null);
+  const searchSnapshotRef = useRef<AppSnapshot | null>(null);
+  const restoreSearchSnapshotRef = useRef(false);
 
   useEffect(() => {
     searchQueueRef.current = searchQueue;
   }, [searchQueue]);
+
+  useEffect(() => {
+    pathSelectedNodesRef.current = pathSelectedNodes;
+  }, [pathSelectedNodes]);
 
   // --- Effects & Logic ---
 
@@ -167,6 +191,22 @@ const WikiWebExplorer = () => {
 
   useEffect(() => {
     shuffleFeaturedPaths();
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+
+    const mediaQuery = window.matchMedia('(pointer: coarse), (max-width: 640px)');
+    const updateTouchMode = () => setIsTouchDevice(mediaQuery.matches);
+    updateTouchMode();
+
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', updateTouchMode);
+      return () => mediaQuery.removeEventListener('change', updateTouchMode);
+    }
+
+    mediaQuery.addListener(updateTouchMode);
+    return () => mediaQuery.removeListener(updateTouchMode);
   }, []);
 
   useEffect(() => {
@@ -219,7 +259,7 @@ const WikiWebExplorer = () => {
         const results = await WikiService.search(term);
         setSuggestions(results);
         setShowSuggestions(true);
-      } catch (err) {
+      } catch {
         setSuggestions([]);
       }
     }, 500);
@@ -252,9 +292,36 @@ const WikiWebExplorer = () => {
     setActiveLinkContexts(new Set());
     setSearchDockLinkId(null);
     setSearchDockPosition(null);
+    dispatchPinned({ type: 'clear' });
   };
 
-  const handleNodeClick = async (event: any, d: GraphNode) => {
+  const togglePathSelection = useCallback(async (node: GraphNode) => {
+    const nextSelection = [...pathSelectedNodesRef.current];
+    const existingIndex = nextSelection.findIndex(item => item.id === node.id);
+
+    if (existingIndex >= 0) {
+      nextSelection.splice(existingIndex, 1);
+      setPathNodes(new Set());
+      setError('');
+    } else {
+      nextSelection.push(node);
+      if (nextSelection.length > 2) nextSelection.shift();
+    }
+
+    pathSelectedNodesRef.current = nextSelection;
+    setPathSelectedNodes(nextSelection);
+
+    if (nextSelection.length === 2) {
+      const [startNode, endNode] = nextSelection;
+      await enqueueSearch(startNode.id, endNode.id, 'shift');
+      return;
+    }
+
+    setPathNodes(new Set());
+    setError('');
+  }, [setPathNodes, setPathSelectedNodes]);
+
+  const handleNodeClick = async (event: MouseEvent, d: GraphNode) => {
     if (event.defaultPrevented) return;
     event.stopPropagation();
 
@@ -264,36 +331,7 @@ const WikiWebExplorer = () => {
     }
 
     if (event.shiftKey) {
-      let shouldEnqueue = false;
-      let n1Id = '';
-      let n2Id = '';
-
-      setPathSelectedNodes(prev => {
-        const newSelection = [...prev];
-        const index = newSelection.findIndex(n => n.id === d.id);
-        if (index >= 0) {
-          newSelection.splice(index, 1);
-          setPathNodes(new Set());
-          setError('');
-        } else {
-          newSelection.push(d);
-          if (newSelection.length > 2) newSelection.shift();
-        }
-
-        if (newSelection.length === 2) {
-          const [n1, n2] = newSelection;
-          shouldEnqueue = true;
-          n1Id = n1.id;
-          n2Id = n2.id;
-        } else {
-          setPathNodes(new Set()); setError('');
-        }
-        return newSelection;
-      });
-
-      if (shouldEnqueue) {
-        await enqueueSearch(n1Id, n2Id, 'shift');
-      }
+      await togglePathSelection(d);
       return;
     }
 
@@ -415,7 +453,10 @@ const WikiWebExplorer = () => {
     const trimmed = apiContactEmail.trim();
     if (trimmed) localStorage.setItem('wikiApiContactEmail', trimmed);
     else localStorage.removeItem('wikiApiContactEmail');
-    WikiService.setApiUserAgent(trimmed ? `WikiWebMap (${trimmed})` : undefined);
+    const apiUserAgent = trimmed
+      ? (trimmed.includes('/') || trimmed.includes('(') ? trimmed : `WikiWebMap (${trimmed})`)
+      : undefined;
+    WikiService.setApiUserAgent(apiUserAgent);
   }, [apiContactEmail]);
 
   useEffect(() => {
@@ -468,20 +509,34 @@ const WikiWebExplorer = () => {
     graphManagerRef.current?.setPathHighlight(pathNodes.size > 0 ? pathNodes : null);
   }, [pathNodes]);
 
+  const resetSearchUi = useCallback(() => {
+    setSearchDockLinkId(null);
+    setSearchDockPosition(null);
+    setFoundPaths([]);
+    setSearchLog([]);
+    setSearchProgress(prev => ({ ...createDefaultSearchProgress(), keepSearching: prev.keepSearching }));
+    dispatchPinned({ type: 'clear' });
+  }, []);
+
+  const restoreSearchSnapshot = useCallback((message: string) => {
+    if (searchSnapshotRef.current) {
+      restoreSnapshot(searchSnapshotRef.current);
+    } else {
+      resetGraphState();
+    }
+    resetSearchUi();
+    setSearchTerm('');
+    setError(message);
+  }, [resetGraphState, resetSearchUi, restoreSnapshot]);
+
   // Search Logic (kept in App for now, but uses hook wrapper)
   const cancelSearch = () => {
     searchAbortRef.current = true;
     searchPauseRef.current = false;
-    setSearchDockLinkId(null);
-    setSearchDockPosition(null);
-    setFoundPaths([]);
-    setError('Search cancelled');
-    setSearchLog(prev => [...prev, `[USER] Abort command received.`]);
-    setTimeout(() => {
-      setSearchProgress(prev => ({ ...prev, isSearching: false, isPaused: false }));
-      setPathSelectedNodes([]);
-    }, 1000);
-  }
+    restoreSearchSnapshotRef.current = true;
+    setError('Cancelling search and restoring the previous graph...');
+    setSearchLog(prev => [...prev, `[USER] Abort command received.`].slice(-8));
+  };
 
   const pauseSearch = () => {
     searchPauseRef.current = true;
@@ -548,26 +603,23 @@ const WikiWebExplorer = () => {
     });
   };
 
-  const runQueuedSearch = async (job: { id: string; from: string; to: string; source: 'suggested' | 'shift' }) => {
+  const runQueuedSearch = async (job: SearchJob) => {
     isRunningSearchRef.current = true;
     setActiveSearch(job);
     setSearchTerminalMinimized(false);
-
-    const resetGraphForSuggested = async () => {
-      pushHistory();
-      mutationEpochRef.current++;
-      updateQueueRef.current?.clear();
-      if (graphManagerRef.current) graphManagerRef.current.clear();
-      setUserTypedNodes(new Set());
-      // ... clearing other hook state directly might be cleaner via a clear() method in hook
-      // But for now, we don't have a clear() method exposed that resets everything. 
-      // We'll rely on what we can or just accept manual clearing for now.
-      // Actually, let's just use what we have. 
-    };
+    searchAbortRef.current = false;
+    searchPauseRef.current = false;
+    restoreSearchSnapshotRef.current = false;
+    searchSnapshotRef.current = captureSnapshot();
+    setFoundPaths([]);
+    setSearchDockLinkId(null);
+    setSearchDockPosition(null);
+    dispatchPinned({ type: 'clear' });
 
     try {
       if (job.source === 'suggested') {
-        await resetGraphForSuggested();
+        pushHistory();
+        resetGraphState();
         setShowFeaturedPaths(false);
         setShowSuggestions(false);
         setSearchTerm(`${job.from} → ${job.to}`);
@@ -582,18 +634,38 @@ const WikiWebExplorer = () => {
         addTopic(job.from, true, undefined, undefined),
         addTopic(job.to, true, undefined, undefined)
       ]);
+      if (searchAbortRef.current) {
+        restoreSearchSnapshotRef.current = true;
+        return;
+      }
       setSearchLog(prev => [...prev, `[QUEUE] Launching pathfinder...`].slice(-8));
-      await findPath(startTitle || job.from, endTitle || job.to);
+      if (job.source === 'shift') {
+        pushHistory();
+      }
+      const result = await findPath(startTitle || job.from, endTitle || job.to);
+      if (result.status !== 'completed') {
+        restoreSearchSnapshotRef.current = true;
+      }
     } catch (err: any) {
+      restoreSearchSnapshotRef.current = true;
       setError(err?.message || 'Error during queued search');
     } finally {
+      if (restoreSearchSnapshotRef.current) {
+        const restoreMessage = searchAbortRef.current
+          ? 'Search cancelled. Restored the previous graph.'
+          : 'Search ended without a complete path. Restored the previous graph.';
+        restoreSearchSnapshot(restoreMessage);
+      } else {
+        setSearchProgress(prev => ({ ...prev, isSearching: false, isPaused: false }));
+      }
       isRunningSearchRef.current = false;
       setActiveSearch(null);
+      searchSnapshotRef.current = null;
       if (searchQueueRef.current.length > 0) {
         const next = searchQueueRef.current[0];
         searchQueueRef.current = searchQueueRef.current.slice(1);
         setSearchQueue(searchQueueRef.current);
-        runQueuedSearch(next);
+        void runQueuedSearch(next);
       }
     }
   };
@@ -678,6 +750,9 @@ const WikiWebExplorer = () => {
         setApiContactEmail={setApiContactEmail}
         nodeCount={nodeCount}
         linkCount={linkCount}
+        canPruneLeaves={nodeCount > 0}
+        canDeleteSelection={bulkSelectedNodes.length > 0}
+        isTouchDevice={isTouchDevice}
         onPruneLeaves={() => pruneLeafNodes(setError)}
         onDeleteSelection={handlePruneGraph}
       />
@@ -701,6 +776,7 @@ const WikiWebExplorer = () => {
         isMinimized={searchTerminalMinimized}
         onToggleMinimize={() => setSearchTerminalMinimized(v => !v)}
         persistentVisible={keepSearching || searchQueue.length > 0 || Boolean(activeSearch)}
+        isTouchDevice={isTouchDevice}
         onOpenLogs={() => setLogPanelOpen(true)}
       />
 
@@ -711,9 +787,14 @@ const WikiWebExplorer = () => {
         clickedCategories={clickedNode ? nodeCategories[clickedNode.title] : undefined}
         clickedBacklinkCount={clickedNode ? nodeBacklinkCounts[clickedNode.title] : undefined}
         nodeThumbnails={nodeThumbnails}
+        isPathSelected={Boolean(clickedNode && pathSelectedNodes.some(node => node.id === clickedNode.id))}
+        pathSelectionCount={pathSelectedNodes.length}
         onClose={() => setClickedNode(null)}
         onExpand={handleExpandNode}
-        onPruneLeaves={() => pruneLeafNodes(setError)}
+        onTogglePathSelection={() => {
+          if (!clickedNode) return Promise.resolve();
+          return togglePathSelection(clickedNode);
+        }}
         onDelete={handleDeleteNode}
       />
 
@@ -723,6 +804,7 @@ const WikiWebExplorer = () => {
         link={displayedLink}
         pinnedLinks={pinnedLinks}
         selectedPinnedLinkId={pinnedState.selectedId}
+        isTouchDevice={isTouchDevice}
         onSelectPinned={(linkId) => dispatchPinned({ type: 'select', id: linkId })}
         onRemovePinned={(linkId) => dispatchPinned({ type: 'remove', id: linkId })}
         onPinToggle={() => {
@@ -740,8 +822,6 @@ const WikiWebExplorer = () => {
           setHoveredLinkId(null);
         }}
       />
-
-      <Legend nodeCount={nodeCount} />
     </div>
   );
 };

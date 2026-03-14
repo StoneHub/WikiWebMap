@@ -1,8 +1,7 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef } from 'react';
 import { GraphManager, Node as GraphNode, Link, GraphStateSnapshot } from '../GraphManager';
 import { UpdateQueue } from '../UpdateQueue';
 import { WikiService, LinkWithContext } from '../WikiService';
-import { connectionLogger } from '../ConnectionLogger';
 
 export type AppSnapshot = {
     graph: GraphStateSnapshot;
@@ -11,6 +10,9 @@ export type AppSnapshot = {
     expandedNodes: string[];
     pathNodes: string[];
     nodeThumbnails: Record<string, string>;
+    nodeDescriptions: Record<string, string>;
+    nodeCategories: Record<string, string[]>;
+    nodeBacklinkCounts: Record<string, number>;
 };
 
 export const useGraphState = () => {
@@ -27,7 +29,7 @@ export const useGraphState = () => {
     const [autoDiscoveredNodes, setAutoDiscoveredNodes] = useState(new Set<string>());
     const [expandedNodes, setExpandedNodes] = useState(new Set<string>());
     const [pathNodes, setPathNodes] = useState(new Set<string>());
-    const [recentlyAddedNodes] = useState(new Set<string>());
+    const [recentlyAddedNodes, setRecentlyAddedNodes] = useState(new Set<string>());
 
     const [pathSelectedNodes, setPathSelectedNodes] = useState<GraphNode[]>([]);
     const [bulkSelectedNodes, setBulkSelectedNodes] = useState<GraphNode[]>([]);
@@ -55,6 +57,9 @@ export const useGraphState = () => {
             expandedNodes: Array.from(expandedNodes),
             pathNodes: Array.from(pathNodes),
             nodeThumbnails: { ...nodeThumbnails },
+            nodeDescriptions: { ...nodeDescriptions },
+            nodeCategories: { ...nodeCategories },
+            nodeBacklinkCounts: { ...nodeBacklinkCounts },
         };
     };
 
@@ -80,11 +85,42 @@ export const useGraphState = () => {
         setExpandedNodes(new Set(snap.expandedNodes));
         setPathNodes(new Set(snap.pathNodes));
         setNodeThumbnails(snap.nodeThumbnails);
+        setNodeDescriptions(snap.nodeDescriptions);
+        setNodeCategories(snap.nodeCategories);
+        setNodeBacklinkCounts(snap.nodeBacklinkCounts);
+        setRecentlyAddedNodes(new Set());
 
         setBulkSelectedNodes([]);
         setPathSelectedNodes([]);
         setClickedNode(null);
         setClickedSummary('');
+    };
+
+    const captureSnapshot = () => createSnapshot();
+
+    const resetGraphState = (options: { clearHistory?: boolean } = {}) => {
+        mutationEpochRef.current++;
+        updateQueueRef.current?.clear();
+        graphManagerRef.current?.clear();
+
+        setUserTypedNodes(new Set());
+        setAutoDiscoveredNodes(new Set());
+        setExpandedNodes(new Set());
+        setPathNodes(new Set());
+        setRecentlyAddedNodes(new Set());
+        setPathSelectedNodes([]);
+        setBulkSelectedNodes([]);
+        setNodeThumbnails({});
+        setNodeDescriptions({});
+        setNodeCategories({});
+        setNodeBacklinkCounts({});
+        setClickedNode(null);
+        setClickedSummary('');
+
+        if (options.clearHistory) {
+            undoStackRef.current = [];
+            redoStackRef.current = [];
+        }
     };
 
     const undo = () => {
@@ -222,10 +258,20 @@ export const useGraphState = () => {
             graphManagerRef.current.deleteNode(nodeId);
         }
         const deleteFromSet = (prev: Set<string>) => { const s = new Set(prev); s.delete(nodeId); return s; };
+        const deleteFromMap = <T,>(prev: Record<string, T>) => {
+            const next = { ...prev };
+            delete next[nodeId];
+            return next;
+        };
         setUserTypedNodes(deleteFromSet);
         setAutoDiscoveredNodes(deleteFromSet);
         setExpandedNodes(deleteFromSet);
         setPathNodes(deleteFromSet);
+        setRecentlyAddedNodes(deleteFromSet);
+        setNodeThumbnails(deleteFromMap);
+        setNodeDescriptions(deleteFromMap);
+        setNodeCategories(deleteFromMap);
+        setNodeBacklinkCounts(deleteFromMap);
 
         if (clickedNode?.id === nodeId) {
             setClickedNode(null);
@@ -252,11 +298,21 @@ export const useGraphState = () => {
             ids.forEach(id => s.delete(id));
             return s;
         };
+        const removeFromMap = <T,>(prev: Record<string, T>) => {
+            const next = { ...prev };
+            ids.forEach(id => delete next[id]);
+            return next;
+        };
 
         setPathNodes(removeFromSet);
         setUserTypedNodes(removeFromSet);
         setAutoDiscoveredNodes(removeFromSet);
         setExpandedNodes(removeFromSet);
+        setRecentlyAddedNodes(removeFromSet);
+        setNodeThumbnails(removeFromMap);
+        setNodeDescriptions(removeFromMap);
+        setNodeCategories(removeFromMap);
+        setNodeBacklinkCounts(removeFromMap);
 
         if (clickedNode && deletedIds.has(clickedNode.id)) setClickedNode(null);
 
@@ -267,7 +323,42 @@ export const useGraphState = () => {
     const pruneLeafNodes = (setError?: (msg: string) => void) => {
         if (!graphManagerRef.current) return;
         pushHistory();
+        const idsToDelete = graphManagerRef.current
+            .getNodeIds()
+            .filter(id => graphManagerRef.current!.getNodeDegree(id) < 2);
         const deletedCount = graphManagerRef.current.pruneNodes();
+
+        if (deletedCount > 0) {
+            const deletedIds = new Set(idsToDelete);
+            const removeFromSet = (prev: Set<string>) => {
+                const next = new Set(prev);
+                idsToDelete.forEach(id => next.delete(id));
+                return next;
+            };
+            const removeFromMap = <T,>(prev: Record<string, T>) => {
+                const next = { ...prev };
+                idsToDelete.forEach(id => delete next[id]);
+                return next;
+            };
+
+            setPathSelectedNodes(prev => prev.filter(node => !deletedIds.has(node.id)));
+            setBulkSelectedNodes(prev => prev.filter(node => !deletedIds.has(node.id)));
+            setUserTypedNodes(removeFromSet);
+            setAutoDiscoveredNodes(removeFromSet);
+            setExpandedNodes(removeFromSet);
+            setPathNodes(removeFromSet);
+            setRecentlyAddedNodes(removeFromSet);
+            setNodeThumbnails(removeFromMap);
+            setNodeDescriptions(removeFromMap);
+            setNodeCategories(removeFromMap);
+            setNodeBacklinkCounts(removeFromMap);
+
+            if (clickedNode && deletedIds.has(clickedNode.id)) {
+                setClickedNode(null);
+                setClickedSummary('');
+            }
+        }
+
         if (deletedCount > 0) {
             if (setError) setError(`Pruned ${deletedCount} leaf nodes (degree < 2).`);
         } else {
@@ -417,7 +508,7 @@ export const useGraphState = () => {
                 if (newAutoDiscovered.size > 0) setAutoDiscoveredNodes(prev => new Set([...prev, ...newAutoDiscovered]));
                 setExpandedNodes(prev => new Set([...prev, title]));
             }
-        } catch (err: any) {
+        } catch {
             if (setError) setError(`Failed to expand ${title}`);
         } finally {
             if (setLoading) setLoading(false);
@@ -438,6 +529,7 @@ export const useGraphState = () => {
         expandedNodes, setExpandedNodes,
         pathNodes, setPathNodes,
         recentlyAddedNodes,
+        setRecentlyAddedNodes,
         pathSelectedNodes, setPathSelectedNodes,
         bulkSelectedNodes, setBulkSelectedNodes,
         nodeThumbnails, setNodeThumbnails,
@@ -456,6 +548,8 @@ export const useGraphState = () => {
         undo,
         redo,
         pushHistory,
+        captureSnapshot,
+        resetGraphState,
         restoreSnapshot,
     };
 };

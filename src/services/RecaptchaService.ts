@@ -8,6 +8,8 @@
  * against casual bots and automated scripts.
  */
 
+import { runtimeConfig } from '../config/runtimeConfig';
+
 declare global {
   interface Window {
     grecaptcha: {
@@ -18,9 +20,9 @@ declare global {
 }
 
 export class RecaptchaService {
-  // Get site key from environment variable
-  // Test key will always pass - Replace with your actual key in production
-  private static readonly SITE_KEY = import.meta.env.VITE_RECAPTCHA_SITE_KEY || '6LeFqi0sAAAAAFtOhr-p-WVjbTvKe7XVdwAc_2aR';
+  private static readonly SITE_KEY = runtimeConfig.recaptchaSiteKey;
+  private static readonly SCRIPT_ID = 'wikiwebmap-recaptcha-loader';
+  private static loadPromise: Promise<boolean> | null = null;
 
   // Cache for recent verifications to avoid excessive checks
   private static lastVerification: { timestamp: number; passed: boolean } | null = null;
@@ -38,6 +40,17 @@ export class RecaptchaService {
     }
 
     try {
+      if (!this.SITE_KEY) {
+        console.warn('reCAPTCHA site key not configured, skipping verification');
+        return true;
+      }
+
+      const loaded = await this.ensureLoaded();
+      if (!loaded) {
+        console.warn('reCAPTCHA failed to load, skipping verification');
+        return true;
+      }
+
       // Check if grecaptcha is loaded
       if (!window.grecaptcha) {
         console.warn('reCAPTCHA not loaded, skipping verification');
@@ -45,10 +58,11 @@ export class RecaptchaService {
       }
 
       // Get reCAPTCHA token
+      const siteKey = this.SITE_KEY;
       const token = await new Promise<string>((resolve, reject) => {
         window.grecaptcha.ready(() => {
           window.grecaptcha
-            .execute(this.SITE_KEY, { action })
+            .execute(siteKey!, { action })
             .then(resolve)
             .catch(reject);
         });
@@ -82,5 +96,36 @@ export class RecaptchaService {
    */
   static isLoaded(): boolean {
     return typeof window.grecaptcha !== 'undefined';
+  }
+
+  private static async ensureLoaded(): Promise<boolean> {
+    if (typeof window === 'undefined' || typeof document === 'undefined') {
+      return false;
+    }
+
+    if (this.isLoaded()) return true;
+    if (this.loadPromise) return this.loadPromise;
+
+    const existingScript = document.getElementById(this.SCRIPT_ID) as HTMLScriptElement | null;
+    if (existingScript) {
+      this.loadPromise = new Promise(resolve => {
+        existingScript.addEventListener('load', () => resolve(true), { once: true });
+        existingScript.addEventListener('error', () => resolve(false), { once: true });
+      });
+      return this.loadPromise;
+    }
+
+    this.loadPromise = new Promise(resolve => {
+      const script = document.createElement('script');
+      script.id = this.SCRIPT_ID;
+      script.async = true;
+      script.defer = true;
+      script.src = `https://www.google.com/recaptcha/api.js?render=${encodeURIComponent(this.SITE_KEY!)}`;
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.head.appendChild(script);
+    });
+
+    return this.loadPromise;
   }
 }

@@ -44,7 +44,11 @@ export const SearchOverlay: React.FC<SearchOverlayProps> = ({
                 </h1>
 
                 <div className="relative">
+                    <label htmlFor="wiki-topic-search" className="sr-only">
+                        Search a Wikipedia topic
+                    </label>
                     <input
+                        id="wiki-topic-search"
                         type="text"
                         value={searchTerm}
                         onChange={onSearchChange}
@@ -56,8 +60,9 @@ export const SearchOverlay: React.FC<SearchOverlayProps> = ({
                             setTimeout(() => setShowSuggestions(false), 200);
                             setTimeout(() => onBlurSearch(), 200);
                         }}
-                        onKeyPress={(e) => e.key === 'Enter' && onAddTopic(searchTerm)}
-                        placeholder="Evaluate topic..."
+                        onKeyDown={(e) => e.key === 'Enter' && onAddTopic(searchTerm)}
+                        placeholder="Search a Wikipedia topic..."
+                        aria-label="Search a Wikipedia topic"
                         className="w-full pl-4 pr-4 py-3 bg-gray-900/50 border border-gray-700 rounded-xl focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all text-sm placeholder-gray-500 text-white"
                     />
                 </div>

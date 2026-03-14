@@ -3,6 +3,11 @@ import type { GraphManager, Link, Node } from '../../GraphManager';
 import { WikiService } from '../../WikiService';
 import type { SearchProgress } from '../../types/SearchProgress';
 
+export type PathfinderResult = {
+  status: 'completed' | 'aborted' | 'not_found';
+  foundPathCount: number;
+};
+
 export async function runPathfinder(args: {
   startInput: string;
   endInput: string;
@@ -18,7 +23,7 @@ export async function runPathfinder(args: {
   setError: Dispatch<SetStateAction<string>>;
   setPathSelectedNodes: Dispatch<SetStateAction<Node[]>>;
   onFoundPath?: (args: { triggerLinkId: string; path: string[] }) => void;
-}) {
+}): Promise<PathfinderResult> {
   args.setLoading(true);
   args.setSearchLog(['Initializing PathFinder protocol...']);
   let startTitle = args.startInput;
@@ -85,9 +90,16 @@ export async function runPathfinder(args: {
 
   try {
     while (queue.length > 0) {
-      if (args.searchAbortRef.current) break;
+      if (args.searchAbortRef.current) {
+        args.setSearchLog(prev => [...prev, '[USER] Search cancelled before next node scan.'].slice(-8));
+        return { status: 'aborted', foundPathCount: 0 };
+      }
       while (args.searchPauseRef.current && !args.searchAbortRef.current) {
         await new Promise(r => setTimeout(r, 120));
+      }
+      if (args.searchAbortRef.current) {
+        args.setSearchLog(prev => [...prev, '[USER] Search cancelled while paused.'].slice(-8));
+        return { status: 'aborted', foundPathCount: 0 };
       }
       const { title, depth } = queue.shift()!;
 
@@ -120,6 +132,10 @@ export async function runPathfinder(args: {
       if (nodesExplored > 500) throw new Error(`Exceeded exploration limit (500 nodes).`);
 
       const links = await WikiService.fetchLinks(title);
+      if (args.searchAbortRef.current) {
+        args.setSearchLog(prev => [...prev, '[USER] Search cancelled after current fetch completed.'].slice(-8));
+        return { status: 'aborted', foundPathCount: 0 };
+      }
 
       for (const linkObj of links) {
         const link = linkObj.title;
@@ -149,22 +165,24 @@ export async function runPathfinder(args: {
     }
 
     if (foundDepth === null) {
-      if (!args.searchAbortRef.current) {
-        args.setError('No path found. Try a related topic or increase depth, then search again.');
-        args.setSearchLog(prev =>
-          [...prev, `[FAILURE] Target not found. Try related topics or increase depth.`].slice(-8)
-        );
-      }
-      return;
+      args.setError('No path found. Try a related topic or increase depth, then search again.');
+      args.setSearchLog(prev =>
+        [...prev, `[FAILURE] Target not found. Try related topics or increase depth.`].slice(-8)
+      );
+      return { status: 'not_found', foundPathCount: 0 };
     }
 
     const keepSearching = args.keepSearchingRef.current;
     const paths = keepSearching ? buildPaths(5) : buildPaths(1);
+    if (args.searchAbortRef.current) {
+      args.setSearchLog(prev => [...prev, '[USER] Search cancelled before rendering path results.'].slice(-8));
+      return { status: 'aborted', foundPathCount: 0 };
+    }
 
     if (paths.length === 0) {
       args.setError('Path found but could not be reconstructed.');
       args.setSearchLog(prev => [...prev, `[ERROR] Failed to reconstruct path.`].slice(-8));
-      return;
+      return { status: 'not_found', foundPathCount: 0 };
     }
 
     paths.forEach((path, index) => {
@@ -199,9 +217,11 @@ export async function runPathfinder(args: {
     });
 
     args.setSearchLog(prev => [...prev, `[DONE] Found ${paths.length} path(s).`].slice(-8));
+    return { status: 'completed', foundPathCount: paths.length };
   } catch (err: any) {
     args.setError(err.message || 'Error during pathfinding');
     args.setSearchLog(prev => [...prev, `[ERROR] ${err.message}`].slice(-8));
+    throw err;
   } finally {
     args.setLoading(false);
     args.setSearchProgress(prev => ({ ...prev, isSearching: false, isPaused: false }));

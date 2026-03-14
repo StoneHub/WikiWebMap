@@ -15,6 +15,9 @@ interface GraphControlsProps {
     setApiContactEmail: (email: string) => void;
     nodeCount: number;
     linkCount: number;
+    canPruneLeaves: boolean;
+    canDeleteSelection: boolean;
+    isTouchDevice: boolean;
     onPruneLeaves: () => void;
     onDeleteSelection: () => void;
 }
@@ -34,6 +37,9 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
     setApiContactEmail,
     nodeCount,
     linkCount,
+    canPruneLeaves,
+    canDeleteSelection,
+    isTouchDevice,
     onPruneLeaves,
     onDeleteSelection,
 }) => {
@@ -75,7 +81,7 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
             </div>
 
             {showLegend && (
-                <div className="bg-gray-800/90 backdrop-blur-md border border-gray-700/50 rounded-2xl p-4 shadow-2xl w-64 max-w-[calc(100vw-2rem)] animate-fade-in-up pointer-events-auto">
+                <div className="fixed inset-x-3 bottom-36 sm:static bg-gray-800/90 backdrop-blur-md border border-gray-700/50 rounded-3xl sm:rounded-2xl p-4 shadow-2xl w-auto sm:w-64 max-w-[calc(100vw-2rem)] animate-fade-in-up pointer-events-auto max-h-[50vh] overflow-y-auto">
                     <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">
                         Legend
                     </h3>
@@ -106,14 +112,14 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                         </div>
                     </div>
                     <div className="mt-3 pt-3 border-t border-gray-700/50 text-[11px] text-gray-300 leading-relaxed">
-                        Incoming links are other articles that link to this topic. Click a node to spotlight its neighbors; click empty space to clear.
+                        Incoming links are other articles that link to this topic. Click or tap a node to spotlight its neighbors; click or tap empty space to clear.
                     </div>
                 </div>
             )}
 
             {/* Settings Bubble */}
             {showSettings && (
-                <div className="bg-gray-800/90 backdrop-blur-md border border-gray-700/50 rounded-2xl p-4 shadow-2xl w-64 max-w-[calc(100vw-2rem)] animate-fade-in-up pointer-events-auto">
+                <div className="fixed inset-x-3 bottom-36 sm:static bg-gray-800/90 backdrop-blur-md border border-gray-700/50 rounded-3xl sm:rounded-2xl p-4 shadow-2xl w-auto sm:w-64 max-w-[calc(100vw-2rem)] animate-fade-in-up pointer-events-auto max-h-[60vh] overflow-y-auto">
                     <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">
                         Graph Physics
                     </h3>
@@ -204,6 +210,11 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                             </div>
                         </div>
                     </div>
+                    {isTouchDevice && (
+                        <div className="mt-4 rounded-2xl border border-blue-500/20 bg-blue-500/5 px-3 py-2 text-[11px] text-blue-100/90 leading-relaxed">
+                            Touch shortcuts: open a node, then use <span className="font-semibold">Select For Path</span> in the details sheet. Multi-select deletion remains desktop-only.
+                        </div>
+                    )}
                     <div className="mt-4 pt-3 border-t border-gray-700/50 text-[9px] text-gray-500 leading-relaxed">
                         Protected by reCAPTCHA.{' '}
                         <a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer" className="underline hover:text-gray-400">Privacy</a>
@@ -216,7 +227,8 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
             <div className="flex gap-2 bg-gray-900/80 backdrop-blur-md border border-gray-700/60 rounded-2xl p-2 shadow-2xl pointer-events-auto">
                 <button
                     onClick={onPruneLeaves}
-                    className="h-10 sm:h-12 px-3 sm:px-5 bg-gray-800/80 hover:bg-gray-700/80 border border-gray-600/50 rounded-xl shadow-xl flex items-center justify-center gap-1.5 sm:gap-2 text-gray-200 hover:text-white transition-all hover:scale-[1.02]"
+                    disabled={!canPruneLeaves}
+                    className="h-10 sm:h-12 px-3 sm:px-5 bg-gray-800/80 hover:bg-gray-700/80 border border-gray-600/50 rounded-xl shadow-xl flex items-center justify-center gap-1.5 sm:gap-2 text-gray-200 hover:text-white transition-all hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-gray-800/80 disabled:hover:text-gray-200"
                     title="Remove nodes with fewer than 2 connections"
                 >
                     <span className="text-base sm:text-lg">✂️</span>
@@ -225,11 +237,12 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
 
                 <button
                     onClick={onDeleteSelection}
-                    className="h-10 sm:h-12 px-3 sm:px-5 bg-gray-800/70 hover:bg-red-900/80 border border-gray-600/50 hover:border-red-500/50 rounded-xl shadow-xl flex items-center justify-center gap-1.5 sm:gap-2 text-gray-200 hover:text-white transition-all hover:scale-[1.02]"
-                    title="Delete Alt/Option+Drag selected nodes"
+                    disabled={!canDeleteSelection}
+                    className="h-10 sm:h-12 px-3 sm:px-5 bg-gray-800/70 hover:bg-red-900/80 border border-gray-600/50 hover:border-red-500/50 rounded-xl shadow-xl flex items-center justify-center gap-1.5 sm:gap-2 text-gray-200 hover:text-white transition-all hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-gray-800/70 disabled:hover:text-gray-200 disabled:hover:border-gray-600/50"
+                    title={canDeleteSelection ? 'Delete Alt/Option+Drag selected nodes' : 'Select nodes on desktop before deleting'}
                 >
                     <span className="text-base sm:text-lg">🗑️</span>
-                    <span className="font-semibold text-xs sm:text-sm">Delete</span>
+                    <span className="font-semibold text-xs sm:text-sm">Delete Selection</span>
                 </button>
             </div>
         </div>

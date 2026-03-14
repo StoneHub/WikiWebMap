@@ -1,12 +1,107 @@
-name: Deploy to Firebase Hosting
+name: Firebase Hosting CI
 
 on:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
       - main
 
+concurrency:
+  group: firebase-hosting-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  build_and_deploy:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+  smoke:
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Install smoke-test tooling
+        run: npm install --no-save playwright
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Start preview server
+        run: npm run preview -- --host 127.0.0.1 --port 4173 &
+
+      - name: Wait for preview server
+        run: |
+          for i in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:4173 > /dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Preview server did not become ready in time."
+          exit 1
+
+      - name: Run smoke test
+        run: npm run smoke
+
+  deploy_preview:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    needs: smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Deploy PR preview to Firebase Hosting
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: '${{ secrets.GITHUB_TOKEN }}'
+          firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_POSSIBLE_HAVEN_471616_F0 }}'
+          channelId: pr-${{ github.event.pull_request.number }}
+          projectId: possible-haven-471616-f0
+          target: wiki-map
+
+  deploy_live:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: smoke
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

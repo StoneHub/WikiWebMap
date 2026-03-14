@@ -1,9 +1,11 @@
+import { useEffect, useState } from 'react';
 import type { Link } from '../GraphManager';
 
 export function ConnectionStatusBar(props: {
   link: Link | null;
   pinnedLinks: Link[];
   selectedPinnedLinkId: string | null;
+  isTouchDevice: boolean;
   onSelectPinned: (linkId: string) => void;
   onRemovePinned: (linkId: string) => void;
   onPinToggle: () => void;
@@ -11,11 +13,19 @@ export function ConnectionStatusBar(props: {
   onClose: () => void;
 }) {
   const link = props.link;
+  const [showFullContext, setShowFullContext] = useState(false);
+
+  useEffect(() => {
+    setShowFullContext(false);
+  }, [link?.id, props.selectedPinnedLinkId]);
+
   if (!link && props.pinnedLinks.length === 0) {
     return (
-      <div className="fixed left-1/2 bottom-3 -translate-x-1/2 z-40 pointer-events-none">
+      <div className="fixed left-3 right-3 bottom-3 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 z-40 pointer-events-none">
         <div className="pointer-events-none bg-gray-900/70 backdrop-blur-md border border-gray-700/60 rounded-2xl shadow-2xl px-4 py-2 text-[11px] text-gray-300">
-          Hover a connection line for context. Click a line to pin it.
+          {props.isTouchDevice
+            ? 'Tap a connection line for context. Tap again to pin it.'
+            : 'Hover a connection line for context. Click a line to pin it.'}
         </div>
       </div>
     );
@@ -38,9 +48,10 @@ export function ConnectionStatusBar(props: {
   })();
 
   const isPinned = Boolean(link && props.pinnedLinks.some(l => l.id === link.id));
+  const hasLongContext = Boolean(link?.context && link.context.length > 180);
 
   return (
-    <div className="fixed left-1/2 bottom-3 -translate-x-1/2 z-40 w-[min(720px,calc(100vw-1.5rem))] pointer-events-none">
+    <div className="fixed left-3 right-3 bottom-3 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 z-40 sm:w-[min(720px,calc(100vw-1.5rem))] pointer-events-none">
       <div className="pointer-events-auto bg-gray-900/85 backdrop-blur-md border border-gray-700/60 rounded-2xl shadow-2xl px-4 py-3">
         {props.pinnedLinks.length > 0 && (
           <div className="mb-2 flex items-center gap-2 overflow-x-auto scrollbar-thin scrollbar-thumb-gray-700/80 scrollbar-track-transparent">
@@ -154,9 +165,17 @@ export function ConnectionStatusBar(props: {
               </div>
             </div>
           ) : (
-            <div className="text-[12px] text-gray-200 leading-relaxed line-clamp-3 italic">
+            <div className={`text-[12px] text-gray-200 leading-relaxed italic ${showFullContext ? '' : 'line-clamp-3'}`}>
               “{link?.context}”
             </div>
+          )}
+          {hasLongContext && !isLoading && (
+            <button
+              onClick={() => setShowFullContext(value => !value)}
+              className="mt-2 text-[11px] font-medium text-cyan-300 hover:text-cyan-200"
+            >
+              {showFullContext ? 'Show less' : 'Show more'}
+            </button>
           )}
         </div>
       </div>

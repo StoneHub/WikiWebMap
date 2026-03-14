@@ -9,6 +9,8 @@ interface LogPanelProps {
 const LogPanel = ({ isOpen, onClose }: LogPanelProps) => {
     const [logs, setLogs] = useState<ConnectionLog[]>([]);
     const [autoRefresh, setAutoRefresh] = useState(true);
+    const [confirmClear, setConfirmClear] = useState(false);
+    const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
     const refreshLogs = () => {
         setLogs([...connectionLogger.getLogs()].reverse()); // Show newest first
@@ -36,9 +38,19 @@ const LogPanel = ({ isOpen, onClose }: LogPanelProps) => {
     };
 
     const handleClear = () => {
-        if (confirm('Are you sure you want to clear all connection logs?')) {
-            connectionLogger.clearLogs();
-            refreshLogs();
+        connectionLogger.clearLogs();
+        refreshLogs();
+        setConfirmClear(false);
+        setStatusMessage('Connection logs cleared.');
+    };
+
+    const handleCopyJson = async () => {
+        try {
+            const dump = JSON.stringify(connectionLogger.getLogs(), null, 2);
+            await navigator.clipboard.writeText(dump);
+            setStatusMessage('Session logs copied to the clipboard.');
+        } catch {
+            setStatusMessage('Clipboard copy failed. Try exporting the CSV instead.');
         }
     };
 
@@ -75,7 +87,7 @@ const LogPanel = ({ isOpen, onClose }: LogPanelProps) => {
                 </label>
                 <div className="flex gap-2">
                     <button
-                        onClick={handleClear}
+                        onClick={() => setConfirmClear(true)}
                         className="text-xs px-2 py-1 bg-red-900/50 text-red-400 hover:bg-red-900 rounded border border-red-800"
                     >
                         Clear
@@ -87,19 +99,7 @@ const LogPanel = ({ isOpen, onClose }: LogPanelProps) => {
                         Export CSV
                     </button>
                     <button
-                        onClick={() => {
-                            // Helper to dump graph data to clipboard
-                            // We need to access nodes/links from App component, but we don't have them here explicitly.
-                            // However, we can use a "cheat" and access the WikiService cache for now as a proxy, 
-                            // or better, trigger a custom event or use a callback if we refactor. 
-                            // For this specific user request ("simple text dump"), let's dump the logs since they represent connections.
-                            // BUT user wants "current loaded session and ALL loaded results".
-                            // Best way: LogPanel receives a callback prop "onDumpGraph".
-                            // For now, let's just dump the logs as JSON which is accessible here.
-                            const dump = JSON.stringify(connectionLogger.getLogs(), null, 2);
-                            navigator.clipboard.writeText(dump);
-                            alert('Session logs copied to clipboard!');
-                        }}
+                        onClick={() => void handleCopyJson()}
                         className="text-xs px-2 py-1 bg-gray-600 text-white hover:bg-gray-700 rounded"
                         title="Copy session data to clipboard for analysis"
                     >
@@ -107,6 +107,39 @@ const LogPanel = ({ isOpen, onClose }: LogPanelProps) => {
                     </button>
                 </div>
             </div>
+            {(confirmClear || statusMessage) && (
+                <div className="border-b border-gray-700 bg-gray-900/80 px-3 py-2 text-xs">
+                    {confirmClear ? (
+                        <div className="flex items-center justify-between gap-3 text-gray-200">
+                            <span>Clear all connection logs for this browser session?</span>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={() => setConfirmClear(false)}
+                                    className="rounded border border-gray-700 px-2 py-1 text-gray-300 hover:bg-gray-800"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={handleClear}
+                                    className="rounded border border-red-700 bg-red-900/40 px-2 py-1 text-red-200 hover:bg-red-900/60"
+                                >
+                                    Confirm
+                                </button>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="flex items-center justify-between gap-3">
+                            <span className="text-gray-300">{statusMessage}</span>
+                            <button
+                                onClick={() => setStatusMessage(null)}
+                                className="text-gray-400 hover:text-white"
+                            >
+                                Dismiss
+                            </button>
+                        </div>
+                    )}
+                </div>
+            )}
 
             <div className="flex-1 overflow-auto p-0 font-mono text-xs">
                 <table className="w-full text-left border-collapse">
