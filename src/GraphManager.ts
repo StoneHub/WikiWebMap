@@ -659,6 +659,115 @@ export class GraphManager {
     }).length;
   }
 
+  getViewportCenter() {
+    return { x: this.width / 2, y: this.height / 2 };
+  }
+
+  getNodePosition(nodeId: string) {
+    const node = this.nodes.find(n => n.id === nodeId);
+    if (!node || typeof node.x !== 'number' || typeof node.y !== 'number') return null;
+    return { x: node.x, y: node.y };
+  }
+
+  applyQueuedUpdate(newNodes: Node[], newLinks: Link[]) {
+    let addedNodes = 0;
+    let addedLinks = 0;
+    const addedLinkRecords: Link[] = [];
+    const updatedLinks: Link[] = [];
+
+    newNodes.forEach(node => {
+      if (!this.nodes.find(n => n.id === node.id)) {
+        const incomingMetadata = node.metadata;
+        const cleanNode: Node = { ...node };
+        delete (cleanNode as any).metadata;
+
+        if (cleanNode.x === undefined) cleanNode.x = this.width / 2 + (Math.random() - 0.5) * 300;
+        if (cleanNode.y === undefined) cleanNode.y = this.height / 2 + (Math.random() - 0.5) * 300;
+
+        this.nodes.push(cleanNode);
+        addedNodes++;
+
+        if (!this.nodeMetadata.has(cleanNode.id)) {
+          this.nodeMetadata.set(cleanNode.id, {
+            isUserTyped: false,
+            isAutoDiscovered: false,
+            isExpanded: false,
+            isInPath: false,
+            isRecentlyAdded: false,
+            isCurrentlyExploring: false,
+            isSelected: false,
+            isPathEndpoint: false,
+            isBulkSelected: false,
+            originSeed: undefined,
+            originDepth: undefined,
+            colorSeed: undefined,
+            colorRole: undefined,
+            isDimmed: false,
+            isDimmedByPath: false,
+            isFocusTarget: false,
+            isFocusNeighbor: false
+          });
+        }
+
+        if (incomingMetadata) {
+          const existing = this.nodeMetadata.get(cleanNode.id)!;
+          this.nodeMetadata.set(cleanNode.id, { ...existing, ...incomingMetadata });
+        }
+      }
+    });
+
+    newLinks.forEach(link => {
+      const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
+      const targetId = typeof link.target === 'object' ? link.target.id : link.target;
+
+      const sourceExists = this.nodes.find(n => n.id === sourceId);
+      const targetExists = this.nodes.find(n => n.id === targetId);
+
+      if (sourceExists && targetExists) {
+        const existingLink = this.links.find(l => {
+          const lSourceId = typeof l.source === 'object' ? l.source.id : l.source;
+          const lTargetId = typeof l.target === 'object' ? l.target.id : l.target;
+          return lSourceId === sourceId && lTargetId === targetId;
+        });
+
+        if (!existingLink) {
+          if (!link.id) link.id = `${sourceId}-${targetId}`;
+          this.links.push(link);
+          addedLinks++;
+          addedLinkRecords.push(link);
+        } else {
+          if (link.type === 'path' && existingLink.type !== 'path') {
+            existingLink.type = 'path';
+            updatedLinks.push(existingLink);
+          }
+          if (link.context && !existingLink.context) {
+            existingLink.context = link.context;
+            if (!updatedLinks.includes(existingLink)) updatedLinks.push(existingLink);
+          }
+        }
+      }
+    });
+
+    if (addedNodes > 0) {
+      this.simulation.nodes(this.nodes);
+    }
+    if (addedLinks > 0) {
+      (this.simulation.force('link') as d3.ForceLink<any, Link>).links(this.links);
+    }
+
+    if (addedNodes > 0 || addedLinks > 0) {
+      this.simulation.alpha(0.3).restart();
+      this.updateDOM();
+      this.notifyStats();
+    } else if (updatedLinks.length > 0) {
+      this.updateDOM();
+    }
+
+    if ((addedLinkRecords.length > 0 || updatedLinks.length > 0) && this.callbacks.onLinksApplied) {
+      this.callbacks.onLinksApplied({ added: addedLinkRecords, updated: updatedLinks });
+    }
+  }
+
   getStateSnapshot(): GraphStateSnapshot {
     const nodes = this.nodes.map(n => ({ ...n }));
     const links = this.links.map(l => {

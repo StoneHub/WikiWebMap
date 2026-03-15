@@ -328,7 +328,7 @@ const WikiWebExplorer = () => {
     deleteNodeImperative(nodeId);
   };
 
-  const handlePruneGraph = () => {
+  const handleDeleteSelection = () => {
     pruneGraph(setError);
     // Extra cleaner for App-local state
     setActiveLinkContexts(new Set());
@@ -725,6 +725,13 @@ const WikiWebExplorer = () => {
   const pinnedLinks = pinnedState.ids
     .map(id => graphManagerRef.current?.getLinkById(id))
     .filter((x): x is Link => Boolean(x));
+  const mobileSearchDockMode = !isTouchDevice
+    ? 'none'
+    : searchProgress.isSearching && !searchTerminalMinimized
+      ? 'sheet'
+      : (searchTerminalMinimized || keepSearching || searchQueue.length > 0 || Boolean(activeSearch))
+        ? 'bar'
+        : 'none';
 
   useEffect(() => {
     if (!displayedLinkId || !graphManagerRef.current) return;
@@ -759,6 +766,8 @@ const WikiWebExplorer = () => {
       <SearchOverlay
         searchTerm={searchTerm}
         setSearchTerm={setSearchTerm}
+        hasGraphContent={nodeCount > 0}
+        isTouchDevice={isTouchDevice}
         loading={loading}
         error={error}
         suggestions={suggestions}
@@ -796,8 +805,10 @@ const WikiWebExplorer = () => {
         canPruneLeaves={nodeCount > 0}
         canDeleteSelection={bulkSelectedNodes.length > 0}
         isTouchDevice={isTouchDevice}
+        mobileDockMode={mobileSearchDockMode}
         onPruneLeaves={() => pruneLeafNodes(setError)}
-        onDeleteSelection={handlePruneGraph}
+        onDeleteSelection={handleDeleteSelection}
+        onOpenLogs={() => setLogPanelOpen(true)}
       />
 
       <SearchStatusOverlay

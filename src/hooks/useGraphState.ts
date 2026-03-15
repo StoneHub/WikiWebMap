@@ -15,7 +15,26 @@ export type AppSnapshot = {
     nodeBacklinkCounts: Record<string, number>;
 };
 
+const INITIAL_SEED_OUTGOING_LIMIT = 9;
+const INITIAL_SEED_BACKLINK_LIMIT = 3;
+
 export const useGraphState = () => {
+    const getRadialSpawnPosition = (
+        anchor: { x: number; y: number },
+        index: number,
+        total: number,
+        baseRadius: number
+    ) => {
+        const count = Math.max(total, 1);
+        const angle = ((index % count) / count) * Math.PI * 2 - Math.PI / 2;
+        const ring = Math.floor(index / Math.max(6, count));
+        const radius = baseRadius + ring * 54;
+        return {
+            x: anchor.x + Math.cos(angle) * radius,
+            y: anchor.y + Math.sin(angle) * radius,
+        };
+    };
+
     // --- Refs ---
     const graphManagerRef = useRef<GraphManager | null>(null);
     const updateQueueRef = useRef<UpdateQueue | null>(null);
@@ -179,19 +198,38 @@ export const useGraphState = () => {
             }
 
             setUserTypedNodes(prev => new Set([...prev, resolvedTitle]));
+            const existingNodeCount = graphManagerRef.current?.getNodeIds().length || 0;
+            const isInitialSeed = existingNodeCount === 0;
+            const visibleLinks = isInitialSeed ? links.slice(0, INITIAL_SEED_OUTGOING_LIMIT) : links;
+            const visibleBacklinks = isInitialSeed ? backlinks.slice(0, INITIAL_SEED_BACKLINK_LIMIT) : backlinks;
+            const viewportCenter = graphManagerRef.current?.getViewportCenter() || { x: 0, y: 0 };
+            const rootAngle = existingNodeCount * 0.85;
+            const rootRadius = existingNodeCount === 0 ? 0 : Math.min(260, 90 + existingNodeCount * 14);
+            const rootPosition = {
+                x: viewportCenter.x + Math.cos(rootAngle) * rootRadius,
+                y: viewportCenter.y + Math.sin(rootAngle) * rootRadius,
+            };
+            const spawnCount = Math.max(visibleLinks.length + visibleBacklinks.length, 1);
+            let spawnIndex = 0;
 
             const newNodes: GraphNode[] = [{
                 id: resolvedTitle,
                 title: resolvedTitle,
+                x: rootPosition.x,
+                y: rootPosition.y,
                 metadata: { originSeed: resolvedTitle, originDepth: 0, colorRole: 'root' }
             }];
             const newLinks: Link[] = [];
             const newAutoDiscovered = new Set<string>();
 
-            links.forEach((linkObj: LinkWithContext) => {
+            visibleLinks.forEach((linkObj: LinkWithContext) => {
+                const position = getRadialSpawnPosition(rootPosition, spawnIndex, spawnCount, 130);
+                spawnIndex++;
                 newNodes.push({
                     id: linkObj.title,
                     title: linkObj.title,
+                    x: position.x,
+                    y: position.y,
                     metadata: { originSeed: resolvedTitle, originDepth: 1, colorRole: 'child' }
                 });
                 newAutoDiscovered.add(linkObj.title);
@@ -204,11 +242,15 @@ export const useGraphState = () => {
                 });
             });
 
-            backlinks.forEach((blTitle: string) => {
+            visibleBacklinks.forEach((blTitle: string) => {
                 if (!blTitle || blTitle === resolvedTitle) return;
+                const position = getRadialSpawnPosition(rootPosition, spawnIndex, spawnCount, 130);
+                spawnIndex++;
                 newNodes.push({
                     id: blTitle,
                     title: blTitle,
+                    x: position.x,
+                    y: position.y,
                     metadata: { originSeed: resolvedTitle, originDepth: 1, colorRole: 'child' }
                 });
                 newAutoDiscovered.add(blTitle);
@@ -390,6 +432,7 @@ export const useGraphState = () => {
             const originSeed = originMeta?.originSeed || title;
             const originDepthBase = originMeta?.originDepth ?? 0;
             const existingGraphNodeIds = new Set(gm?.getNodeIds() || []);
+            const originPosition = gm?.getNodePosition(title) || gm?.getViewportCenter() || { x: 0, y: 0 };
 
             if (categories.length > 0) setNodeCategories(prev => ({ ...prev, [title]: categories }));
             if (includeBacklinks) setNodeBacklinkCounts(prev => ({ ...prev, [title]: backlinks.length }));
@@ -462,9 +505,12 @@ export const useGraphState = () => {
 
             sortedCandidates.forEach(c => {
                 const candidateTitle = c.title;
+                const position = getRadialSpawnPosition(originPosition, nodesToAdd.length, sortedCandidates.length, 145);
                 nodesToAdd.push({
                     id: candidateTitle,
                     title: candidateTitle,
+                    x: position.x,
+                    y: position.y,
                     metadata: { originSeed, originDepth: originDepthBase + 1, colorRole: 'child' }
                 });
                 newAutoDiscovered.add(candidateTitle);

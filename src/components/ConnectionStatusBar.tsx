@@ -20,8 +20,12 @@ export function ConnectionStatusBar(props: {
   }, [link?.id, props.selectedPinnedLinkId]);
 
   if (!link && props.pinnedLinks.length === 0) {
+    if (props.isTouchDevice) {
+      return null;
+    }
+
     return (
-      <div className="fixed left-3 right-3 bottom-3 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 z-40 pointer-events-none">
+      <div className="fixed left-3 right-3 bottom-[6.8rem] sm:bottom-3 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 z-30 pointer-events-none">
         <div className="pointer-events-none bg-gray-900/70 backdrop-blur-md border border-gray-700/60 rounded-2xl shadow-2xl px-4 py-2 text-[11px] text-gray-300">
           {props.isTouchDevice
             ? 'Tap a connection line for context. Tap again to pin it.'
@@ -49,12 +53,24 @@ export function ConnectionStatusBar(props: {
 
   const isPinned = Boolean(link && props.pinnedLinks.some(l => l.id === link.id));
   const hasLongContext = Boolean(link?.context && link.context.length > 180);
+  const wrapperClassName = props.isTouchDevice
+    ? 'fixed inset-x-3 bottom-[6.8rem] z-30 pointer-events-none'
+    : 'fixed left-3 right-3 bottom-3 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 z-40 sm:w-[min(720px,calc(100vw-1.5rem))] pointer-events-none';
+  const panelClassName = props.isTouchDevice
+    ? 'pointer-events-auto rounded-[1.75rem] border border-gray-700/60 bg-gray-900/90 px-4 py-4 shadow-[0_20px_60px_rgba(2,6,23,0.55)] backdrop-blur-md'
+    : 'pointer-events-auto bg-gray-900/85 backdrop-blur-md border border-gray-700/60 rounded-2xl shadow-2xl px-4 py-3';
 
   return (
-    <div className="fixed left-3 right-3 bottom-3 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 z-40 sm:w-[min(720px,calc(100vw-1.5rem))] pointer-events-none">
-      <div className="pointer-events-auto bg-gray-900/85 backdrop-blur-md border border-gray-700/60 rounded-2xl shadow-2xl px-4 py-3">
+    <div className={wrapperClassName}>
+      <div className={panelClassName}>
+        {props.isTouchDevice && (
+          <div className="mb-3 flex justify-center">
+            <div className="h-1.5 w-12 rounded-full bg-gray-600/50" />
+          </div>
+        )}
+
         {props.pinnedLinks.length > 0 && (
-          <div className="mb-2 flex items-center gap-2 overflow-x-auto scrollbar-thin scrollbar-thumb-gray-700/80 scrollbar-track-transparent">
+          <div className="mb-3 flex items-center gap-2 overflow-x-auto scrollbar-thin scrollbar-thumb-gray-700/80 scrollbar-track-transparent">
             <div className="text-[10px] uppercase tracking-widest text-gray-400 font-bold shrink-0">
               Pinned
             </div>
@@ -90,11 +106,11 @@ export function ConnectionStatusBar(props: {
           </div>
         )}
 
-        <div className="flex items-start justify-between gap-3">
+        <div className={props.isTouchDevice ? 'space-y-3' : 'flex items-start justify-between gap-3'}>
           <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <div className="text-[10px] uppercase tracking-widest text-cyan-300/90 font-bold">
-                Connection
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="text-[10px] uppercase tracking-[0.24em] text-cyan-300/90 font-bold">
+                Connection Context
               </div>
               {link && (
                 <div className="text-[10px] text-gray-400">
@@ -108,7 +124,7 @@ export function ConnectionStatusBar(props: {
               )}
             </div>
             {link ? (
-              <div className="mt-1 text-sm font-semibold text-white truncate">
+              <div className="mt-2 text-sm font-semibold text-white leading-relaxed">
                 <button
                   onClick={() => props.onFocusNode(source)}
                   className="underline decoration-white/20 hover:decoration-white/60"
@@ -126,32 +142,46 @@ export function ConnectionStatusBar(props: {
                 </button>
               </div>
             ) : (
-              <div className="mt-1 text-sm font-semibold text-white">
+              <div className="mt-2 text-sm font-semibold text-white">
                 Select a pinned connection.
               </div>
             )}
           </div>
 
-          <div className="flex gap-2 shrink-0">
+          <div className={`flex gap-2 ${props.isTouchDevice ? 'w-full' : 'shrink-0'}`}>
             <button
               onClick={props.onPinToggle}
-              className="h-8 px-3 rounded-xl bg-gray-800/70 hover:bg-gray-700/70 border border-gray-600/50 text-gray-200 text-xs"
+              className={`rounded-2xl bg-gray-800/70 hover:bg-gray-700/70 border border-gray-600/50 text-gray-200 text-xs ${props.isTouchDevice ? 'h-10 flex-1' : 'h-8 px-3'}`}
               title={isPinned ? 'Unpin' : 'Pin'}
             >
               {isPinned ? 'Unpin' : 'Pin'}
             </button>
             <button
               onClick={props.onClose}
-              className="h-8 w-8 rounded-xl bg-gray-800/70 hover:bg-gray-700/70 border border-gray-600/50 text-gray-200 text-xs flex items-center justify-center"
+              className={`rounded-2xl bg-gray-800/70 hover:bg-gray-700/70 border border-gray-600/50 text-gray-200 text-xs flex items-center justify-center ${props.isTouchDevice ? 'h-10 flex-1' : 'h-8 w-8'}`}
               title="Close"
               aria-label="Close"
             >
-              ×
+              {props.isTouchDevice ? 'Close' : '×'}
             </button>
           </div>
         </div>
 
-        <div className="mt-2 bg-black/30 rounded-xl border border-gray-700/50 px-3 py-2">
+        <div className="mt-3 bg-black/30 rounded-2xl border border-gray-700/50 px-3 py-3">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <div className="text-[10px] uppercase tracking-[0.22em] text-gray-400">
+              Article Snippet
+            </div>
+            {hasLongContext && !isLoading && (
+              <button
+                onClick={() => setShowFullContext(value => !value)}
+                className="text-[11px] font-medium text-cyan-300 hover:text-cyan-200"
+              >
+                {showFullContext ? 'Show less' : 'Show more'}
+              </button>
+            )}
+          </div>
+
           {!link ? null : isLoading ? (
             <div className="animate-pulse">
               <div className="flex items-center gap-2 mb-2">
@@ -168,14 +198,6 @@ export function ConnectionStatusBar(props: {
             <div className={`text-[12px] text-gray-200 leading-relaxed italic ${showFullContext ? '' : 'line-clamp-3'}`}>
               “{link?.context}”
             </div>
-          )}
-          {hasLongContext && !isLoading && (
-            <button
-              onClick={() => setShowFullContext(value => !value)}
-              className="mt-2 text-[11px] font-medium text-cyan-300 hover:text-cyan-200"
-            >
-              {showFullContext ? 'Show less' : 'Show more'}
-            </button>
           )}
         </div>
       </div>

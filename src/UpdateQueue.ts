@@ -58,6 +58,14 @@ export class UpdateQueue {
    * Flush queued updates to the graph manager
    */
   flush() {
+    if (this.nodeQueue.length > 0 && this.linkQueue.length > 0) {
+      this.graphManager.applyQueuedUpdate(this.nodeQueue, this.linkQueue);
+      this.nodeQueue = [];
+      this.linkQueue = [];
+      this.timer = null;
+      return;
+    }
+
     if (this.nodeQueue.length > 0) {
       this.graphManager.addNodes(this.nodeQueue);
       this.nodeQueue = [];
