@@ -12,10 +12,11 @@
 
 ## Branch and release flow
 1. Open a pull request against `main`.
-2. Let CI run lint, build, and smoke coverage.
-3. Review the Firebase preview deployment from the PR workflow.
-4. Merge only after preview validation passes.
-5. Live deployment happens from `main` after CI passes.
+2. Run `npm run check` locally when possible.
+3. Let CI run lint, tests, build, and smoke coverage.
+4. Review the Firebase preview deployment from the PR workflow.
+5. Merge only after preview validation passes.
+6. Live deployment happens from `main` after CI passes.
 
 ## Required repository settings
 - Protect `main` so direct pushes are restricted.

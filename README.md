@@ -31,7 +31,7 @@ Live: `https://wikiconnectionsmap.web.app/`
 - GitHub Actions validates pull requests and publishes Firebase preview channels before merge.
 - Merges to `main` deploy to Firebase Hosting live.
 - Bluehost is assumed to be used only for DNS or custom-domain management unless you have separate hosting outside this repo.
-- See `docs/deployment.md`, `docs/release-checklist.md`, and `docs/env-inventory.md` for release workflow details.
+- See `docs/deployment.md`, `docs/release-checklist.md`, `docs/release-prep.md`, `docs/development-plan.md`, `docs/ai-api-mcp-plan.md`, and `docs/env-inventory.md` for release workflow details.
 
 ## Controls (high level)
 - Drag canvas to pan; scroll to zoom.
