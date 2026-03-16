@@ -1,3 +1,5 @@
+import type { LayoutMode } from './layoutConfig';
+
 export type ForestLayoutNode = {
   id: string;
   x?: number;
@@ -25,6 +27,7 @@ type ForestLayoutInput = {
   height: number;
   treeSpacing: number;
   branchSpread: number;
+  layoutMode?: LayoutMode;
 };
 
 type ForestLayoutResult = {
@@ -100,6 +103,7 @@ export const computeForestLayout = ({
   height,
   treeSpacing,
   branchSpread,
+  layoutMode = 'forest',
 }: ForestLayoutInput): ForestLayoutResult => {
   const nodeIds = nodes.map((node) => node.id);
   const childrenByParent = collectPrimaryChildren(nodeIds, metadataById);
@@ -141,64 +145,111 @@ export const computeForestLayout = ({
 
   const targets = new Map<string, { x: number; y: number }>();
   const visibleRootIds = rootIds.filter((rootId) => !hiddenNodeIds.has(rootId));
-  const rootCount = Math.max(visibleRootIds.length, 1);
-  const columns = Math.max(1, Math.min(3, Math.ceil(Math.sqrt(rootCount))));
-  const rows = Math.max(1, Math.ceil(rootCount / columns));
-  const spacingX = clamp(treeSpacing * 2.75, 260, Math.max(260, width * 0.42));
-  const spacingY = clamp(treeSpacing * 1.6, 180, Math.max(180, height * 0.34));
+  if (layoutMode === 'structured') {
+    const startX = clamp(width * 0.18, 150, 250);
+    const startY = clamp(height * 0.14, 90, 150);
+    const columnGap = clamp(treeSpacing * 1.08, 180, Math.max(200, width * 0.2));
+    const rowGap = clamp(branchSpread * 0.7, 84, 156);
+    const rootGap = clamp(branchSpread * 1.08, 150, 240);
+    const depthJitter = Math.min(22, branchSpread * 0.12);
 
-  const getRootAnchor = (rootId: string, index: number) => {
-    const meta = getMeta(metadataById, rootId);
-    if (meta.manualPosition) return meta.manualPosition;
+    const placeStructuredNode = (nodeId: string, depth: number, centerY: number) => {
+      targets.set(nodeId, {
+        x: startX + depth * columnGap + (depth % 2 === 0 ? 0 : depthJitter),
+        y: centerY,
+      });
 
-    const row = Math.floor(index / columns);
-    const col = index % columns;
-    const itemsInRow =
-      row === rows - 1 ? Math.max(1, rootCount - row * columns) : Math.min(columns, rootCount);
-    const rowStartX = width / 2 - ((itemsInRow - 1) * spacingX) / 2;
-    const x = rowStartX + col * spacingX;
-    const y = clamp(height * 0.22 + row * spacingY, 120, Math.max(140, height - 240));
-    return { x, y };
-  };
+      const visibleChildren = (childrenByParent.get(nodeId) || []).filter(
+        (childId) => !hiddenNodeIds.has(childId)
+      );
 
-  const placeNode = (
-    nodeId: string,
-    x: number,
-    y: number,
-    spanWidth: number,
-    depth: number
-  ) => {
-    targets.set(nodeId, { x, y });
-    const visibleChildren = (childrenByParent.get(nodeId) || []).filter(
-      (childId) => !hiddenNodeIds.has(childId)
-    );
+      if (visibleChildren.length === 0) return;
 
-    if (visibleChildren.length === 0) return;
+      const totalSpan = visibleChildren.reduce(
+        (sum, childId) => sum + Math.max(rowGap, countLeaves(childId) * rowGap),
+        0
+      );
 
-    const totalLeaves = visibleChildren.reduce((sum, childId) => sum + countLeaves(childId), 0);
-    const totalSpan = Math.max(spanWidth, visibleChildren.length * branchSpread * 0.95);
-    let cursor = x - totalSpan / 2;
+      let cursorY = centerY - totalSpan / 2;
+      visibleChildren.forEach((childId, index) => {
+        const childSpan = Math.max(rowGap, countLeaves(childId) * rowGap);
+        const childCenterY = cursorY + childSpan / 2;
+        const sway = Math.sin((index + 1) * 0.72 + depth * 0.44) * Math.min(16, rowGap * 0.1);
+        placeStructuredNode(childId, depth + 1, childCenterY + sway);
+        cursorY += childSpan;
+      });
+    };
 
-    visibleChildren.forEach((childId, index) => {
-      const leafCount = countLeaves(childId);
-      const childSpan = Math.max(branchSpread * 0.92, (totalSpan * leafCount) / Math.max(totalLeaves, 1));
-      const childMeta = getMeta(metadataById, childId);
-      const verticalDepth = childMeta.layoutDepth ?? depth + 1;
-      const sway =
-        Math.sin((index + 1) * 1.18 + depth * 0.65) *
-        Math.min(branchSpread * 0.15, 26);
-      const childX = cursor + childSpan / 2 + sway;
-      const childY = y + treeSpacing * (verticalDepth > depth + 1 ? 1.15 : 1);
-      placeNode(childId, childX, childY, childSpan * 0.9, depth + 1);
-      cursor += childSpan;
+    let cursorY = startY;
+    visibleRootIds.forEach((rootId) => {
+      const treeSpan = Math.max(rowGap * 1.1, countLeaves(rootId) * rowGap);
+      const centerY = cursorY + treeSpan / 2;
+      placeStructuredNode(rootId, 0, centerY);
+      cursorY += treeSpan + rootGap;
     });
-  };
+  } else {
+    const rootCount = Math.max(visibleRootIds.length, 1);
+    const columns = Math.max(1, Math.min(3, Math.ceil(Math.sqrt(rootCount))));
+    const rows = Math.max(1, Math.ceil(rootCount / columns));
+    const spacingX = clamp(treeSpacing * 2.75, 260, Math.max(260, width * 0.42));
+    const spacingY = clamp(treeSpacing * 1.6, 180, Math.max(180, height * 0.34));
 
-  visibleRootIds.forEach((rootId, index) => {
-    const rootAnchor = getRootAnchor(rootId, index);
-    const rootSpan = Math.max(branchSpread * 2.2, countLeaves(rootId) * branchSpread * 0.92);
-    placeNode(rootId, rootAnchor.x, rootAnchor.y, rootSpan, 0);
-  });
+    const getRootAnchor = (rootId: string, index: number) => {
+      const meta = getMeta(metadataById, rootId);
+      if (meta.manualPosition) return meta.manualPosition;
+
+      const row = Math.floor(index / columns);
+      const col = index % columns;
+      const itemsInRow =
+        row === rows - 1 ? Math.max(1, rootCount - row * columns) : Math.min(columns, rootCount);
+      const rowStartX = width / 2 - ((itemsInRow - 1) * spacingX) / 2;
+      const x = rowStartX + col * spacingX;
+      const y = clamp(height * 0.22 + row * spacingY, 120, Math.max(140, height - 240));
+      return { x, y };
+    };
+
+    const placeForestNode = (
+      nodeId: string,
+      x: number,
+      y: number,
+      spanWidth: number,
+      depth: number
+    ) => {
+      targets.set(nodeId, { x, y });
+      const visibleChildren = (childrenByParent.get(nodeId) || []).filter(
+        (childId) => !hiddenNodeIds.has(childId)
+      );
+
+      if (visibleChildren.length === 0) return;
+
+      const totalLeaves = visibleChildren.reduce((sum, childId) => sum + countLeaves(childId), 0);
+      const totalSpan = Math.max(spanWidth, visibleChildren.length * branchSpread * 0.95);
+      let cursor = x - totalSpan / 2;
+
+      visibleChildren.forEach((childId, index) => {
+        const leafCount = countLeaves(childId);
+        const childSpan = Math.max(
+          branchSpread * 0.92,
+          (totalSpan * leafCount) / Math.max(totalLeaves, 1)
+        );
+        const childMeta = getMeta(metadataById, childId);
+        const verticalDepth = childMeta.layoutDepth ?? depth + 1;
+        const sway =
+          Math.sin((index + 1) * 1.18 + depth * 0.65) *
+          Math.min(branchSpread * 0.15, 26);
+        const childX = cursor + childSpan / 2 + sway;
+        const childY = y + treeSpacing * (verticalDepth > depth + 1 ? 1.15 : 1);
+        placeForestNode(childId, childX, childY, childSpan * 0.9, depth + 1);
+        cursor += childSpan;
+      });
+    };
+
+    visibleRootIds.forEach((rootId, index) => {
+      const rootAnchor = getRootAnchor(rootId, index);
+      const rootSpan = Math.max(branchSpread * 2.2, countLeaves(rootId) * branchSpread * 0.92);
+      placeForestNode(rootId, rootAnchor.x, rootAnchor.y, rootSpan, 0);
+    });
+  }
 
   nodes.forEach((node) => {
     if (targets.has(node.id) || hiddenNodeIds.has(node.id)) return;

@@ -51,7 +51,6 @@ export function LensingGridBackground(props: {
   const rafRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (props.layoutMode === 'structured') return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -77,8 +76,9 @@ export function LensingGridBackground(props: {
 
       const rawMasses = props.graphManagerRef.current?.getLensingNodes() || [];
       const isForest = props.layoutMode === 'forest';
+      const isGuided = props.layoutMode === 'structured';
       const denseGraph = rawMasses.length > 120;
-      if ((isForest && frameCount % 2 === 1) || (denseGraph && frameCount % 3 !== 0)) {
+      if (((isForest || isGuided) && frameCount % 2 === 1) || (denseGraph && frameCount % 3 !== 0)) {
         rafRef.current = requestAnimationFrame(draw);
         return;
       }
@@ -87,7 +87,7 @@ export function LensingGridBackground(props: {
 
       const intensity = Math.min(
         1.5,
-        Math.max(0, EFFECT_INTENSITY * (isForest ? 0.55 : 1) * (denseGraph ? 0.6 : 1))
+        Math.max(0, EFFECT_INTENSITY * (isForest ? 0.55 : isGuided ? 0.68 : 1) * (denseGraph ? 0.6 : 1))
       );
       const masses = rawMasses
         .sort((a, b) => b.mass - a.mass)
@@ -155,12 +155,11 @@ export function LensingGridBackground(props: {
     };
   }, [props.graphManagerRef, props.layoutMode]);
 
-  if (props.layoutMode === 'structured') {
-    return null;
-  }
-
-  const modeOpacity = props.layoutMode === 'forest' ? 0.26 : 0.35;
-  const opacity = Math.min(0.9, Math.max(0.16, modeOpacity + EFFECT_INTENSITY * (props.layoutMode === 'forest' ? 0.26 : 0.55)));
+  const modeOpacity =
+    props.layoutMode === 'forest' ? 0.26 : props.layoutMode === 'structured' ? 0.22 : 0.35;
+  const modeBoost =
+    props.layoutMode === 'forest' ? 0.26 : props.layoutMode === 'structured' ? 0.18 : 0.55;
+  const opacity = Math.min(0.9, Math.max(0.16, modeOpacity + EFFECT_INTENSITY * modeBoost));
   return (
     <canvas
       ref={canvasRef}

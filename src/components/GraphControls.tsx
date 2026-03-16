@@ -65,7 +65,7 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
     onOpenLogs,
 }) => {
     const [showLegend, setShowLegend] = useState(false);
-    const isStructuredView = layoutMode === 'structured';
+    const isGuidedMap = layoutMode === 'structured';
     const mobileSheetClassName =
         'fixed inset-x-3 bottom-20 pointer-events-auto rounded-[1.75rem] border border-slate-700/70 bg-slate-900/94 p-4 shadow-[0_22px_60px_rgba(2,6,23,0.6)] backdrop-blur-xl max-h-[60vh] overflow-y-auto';
 
@@ -85,13 +85,13 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                     </svg>
                 </div>
                 <div className="flex items-center justify-between">
-                    <span className="text-gray-300">Outgoing links</span>
+                    <span className="text-gray-300">Guided branches</span>
                     <svg width="84" height="12" className="opacity-90">
-                        <line x1="2" y1="6" x2="82" y2="6" stroke="#a3a3a3" strokeWidth="3" />
+                        <line x1="2" y1="6" x2="82" y2="6" stroke="#a3a3a3" strokeWidth="3" strokeLinecap="round" />
                     </svg>
                 </div>
                 <div className="flex items-center justify-between">
-                    <span className="text-gray-300">Incoming links</span>
+                    <span className="text-gray-300">Backlinks</span>
                     <svg width="84" height="12" className="opacity-90">
                         <line x1="2" y1="6" x2="82" y2="6" stroke="#ffb020" strokeWidth="3" strokeDasharray="6 10" />
                     </svg>
@@ -110,7 +110,7 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                 </div>
             </div>
             <div className="mt-3 pt-3 border-t border-gray-700/50 text-[11px] text-gray-300 leading-relaxed">
-                Forest mode emphasizes first-discovered branches while keeping cross-links lighter. Click or tap a node to spotlight its neighbors; click or tap empty space to clear.
+                Guided mode keeps the draggable node map, but adds stronger branch anchors and quieter bridge links so the graph stays readable while you rearrange it.
             </div>
         </>
     );
@@ -160,17 +160,16 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                                 : 'border-slate-700/70 bg-slate-900/50 text-slate-300 hover:border-cyan-400/20'
                                 }`}
                         >
-                            Map
+                            Guided
                         </button>
                     </div>
                     <div className="mt-1 text-[10px] text-gray-500">
-                        {isStructuredView
-                            ? 'Map mode uses the new structured renderer with fixed lanes, stronger hierarchy, and lighter bridge links.'
+                        {isGuidedMap
+                            ? 'Guided keeps the node map draggable while anchoring branches into softer lanes with lighter bridge links.'
                             : 'Forest guides topics into branches. Web keeps the freer spider-map layout.'}
                     </div>
                 </div>
-                {!isStructuredView && (
-                    <div>
+                <div>
                     <div className="flex justify-between text-xs text-gray-400 mb-1">
                         <span>Spacing</span>
                         <span>{nodeSpacing}px</span>
@@ -183,10 +182,8 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                         onChange={(e) => setNodeSpacing(Number(e.target.value))}
                         className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
                     />
-                    </div>
-                )}
-                {!isStructuredView && (
-                    <div>
+                </div>
+                <div>
                     <div className="flex justify-between text-xs text-gray-400 mb-1">
                         <span>Tree Spacing</span>
                         <span>{treeSpacing}px</span>
@@ -200,12 +197,10 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                         className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
                     />
                     <div className="mt-1 text-[10px] text-gray-500">
-                        Controls the vertical growth distance between branch levels in forest mode.
+                        Controls the vertical growth distance between branch levels in guided modes.
                     </div>
-                    </div>
-                )}
-                {!isStructuredView && (
-                    <div>
+                </div>
+                <div>
                     <div className="flex justify-between text-xs text-gray-400 mb-1">
                         <span>Branch Spread</span>
                         <span>{branchSpread}px</span>
@@ -219,10 +214,9 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                         className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
                     />
                     <div className="mt-1 text-[10px] text-gray-500">
-                        Widens or tightens sibling branches in forest mode.
+                        Widens or tightens sibling branches in the guided layouts.
                     </div>
-                    </div>
-                )}
+                </div>
                 <div>
                     <div className="flex justify-between text-xs text-gray-400 mb-1">
                         <span>Recursion Depth</span>
@@ -240,8 +234,7 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                         Effective max depth: {recursionDepth * 2} (capped at 6).
                     </div>
                 </div>
-                {!isStructuredView && (
-                    <div>
+                <div>
                     <div className="flex justify-between text-xs text-gray-400 mb-1">
                         <span>Node Size</span>
                         <span>{Math.round(nodeSizeScale * 100)}%</span>
@@ -255,8 +248,7 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                         onChange={(e) => setNodeSizeScale(Number(e.target.value))}
                         className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
                     />
-                    </div>
-                )}
+                </div>
                 <div>
                     <div className="flex justify-between text-xs text-gray-400 mb-1">
                         <span>Link Visibility</span>
@@ -270,14 +262,14 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                         Show cross-tree links
                     </label>
                     <div className="mt-1 text-[10px] text-gray-500">
-                        {isStructuredView
-                            ? 'Controls whether dashed bridge edges between branches remain visible in the structured renderer.'
+                        {isGuidedMap
+                            ? 'Controls whether dashed bridge links between branches stay visible in Guided mode.'
                             : 'Keeps secondary links between trees visible while forest branches stay readable.'}
                     </div>
                 </div>
-                {isStructuredView && (
+                {isGuidedMap && (
                     <div className="rounded-2xl border border-cyan-400/20 bg-cyan-400/6 px-3 py-2 text-[11px] leading-relaxed text-cyan-50">
-                        Structured View is a read-only beta renderer for now. It shares topic search, path selection, and the details panel with the main graph while we prove the new visual language.
+                        Guided mode is the hybrid follow-up to the map experiment: softer lane structure, no diagram arrows, and full drag-to-arrange still intact.
                     </div>
                 )}
                 <div>

@@ -61,4 +61,29 @@ describe('forestLayout', () => {
     expect(result.targets.has('Leaf')).toBe(false);
     expect(result.treeIds).toEqual(['Other Root', 'Root']);
   });
+
+  it('places structured mode roots into stacked lanes with children to the right', () => {
+    const metadataById = new Map([
+      ['Alpha', { treeId: 'Alpha', layoutDepth: 0 }],
+      ['Alpha Branch', { primaryParentId: 'Alpha', treeId: 'Alpha', layoutDepth: 1 }],
+      ['Beta', { treeId: 'Beta', layoutDepth: 0 }],
+    ]);
+
+    const result = computeForestLayout({
+      nodes: [
+        { id: 'Alpha' },
+        { id: 'Alpha Branch' },
+        { id: 'Beta' },
+      ],
+      metadataById,
+      width: 1400,
+      height: 900,
+      treeSpacing: 180,
+      branchSpread: 150,
+      layoutMode: 'structured',
+    });
+
+    expect(result.targets.get('Alpha Branch')!.x).toBeGreaterThan(result.targets.get('Alpha')!.x);
+    expect(result.targets.get('Beta')!.y).toBeGreaterThan(result.targets.get('Alpha')!.y);
+  });
 });

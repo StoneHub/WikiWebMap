@@ -1,5 +1,21 @@
 # React Flow Structured View Plan
 
+## Status Note
+
+As of March 16, 2026, this doc is best read as an experiment record, not the current shipping direction.
+
+What we learned from the React Flow spike:
+- stronger hierarchy and branch guidance helped
+- always-on arrows felt too diagram-like
+- losing free rearrangement was a regression
+
+Current direction:
+- keep the D3 node map as the main interaction surface
+- fold the useful structure ideas back into a draggable guided node-map mode
+- treat the React Flow implementation as reference material, not the primary renderer
+
+This plan still matters as design history and may be useful again for future diagram or VR-adjacent work.
+
 ## Goal
 
 Create a genuinely different alternate renderer for WikiWebMap using React Flow.

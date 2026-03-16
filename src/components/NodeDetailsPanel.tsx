@@ -113,7 +113,9 @@ export const NodeDetailsPanel: React.FC<NodeDetailsPanelProps> = ({
                                     {layoutMode !== 'web' && (
                                         <span className="px-2.5 py-1 rounded-full bg-cyan-500/10 border border-cyan-400/20 text-cyan-100">
                                             {layoutMode === 'structured'
-                                                ? 'Structured View'
+                                                ? isPinned
+                                                    ? 'Pinned'
+                                                    : 'Guided Map'
                                                 : isPinned
                                                     ? 'Pinned'
                                                     : 'Tree-guided'}
@@ -174,7 +176,7 @@ export const NodeDetailsPanel: React.FC<NodeDetailsPanelProps> = ({
                             >
                                 Expand
                             </button>
-                            {layoutMode === 'forest' && (
+                            {layoutMode !== 'web' && (
                                 <>
                                     <button
                                         onClick={onTogglePin}
@@ -206,7 +208,7 @@ export const NodeDetailsPanel: React.FC<NodeDetailsPanelProps> = ({
                                     ? `Selected For Path (${pathSelectionCount}/2)`
                                     : `Select For Path (${pathSelectionCount}/2)`}
                             </button>
-                            {layoutMode === 'forest' && (
+                            {layoutMode !== 'web' && (
                                 <>
                                     <button
                                         onClick={onRelayoutTree}

@@ -9,7 +9,6 @@ import { NodeDetailsPanel } from './components/NodeDetailsPanel';
 import { SearchStatusOverlay } from './components/SearchStatusOverlay';
 import { LensingGridBackground } from './components/LensingGridBackground';
 import { ConnectionStatusBar } from './components/ConnectionStatusBar';
-import { StructuredFlowView } from './components/StructuredFlowView';
 import type { SearchProgress } from './types/SearchProgress';
 import { runPathfinder } from './features/pathfinding/runPathfinder';
 import { SUGGESTED_PATHS, type SuggestedPath } from './data/suggestedPaths';
@@ -883,32 +882,11 @@ const WikiWebExplorer = () => {
     return () => window.clearTimeout(handle);
   }, [displayedLinkId, pinnedState.selectedId, graphManagerRef]);
 
-  const structuredSnapshot = graphManagerRef.current?.getStateSnapshot() || null;
-
   return (
     <div className="w-screen h-screen bg-gray-900 text-white relative overflow-hidden font-sans">
       <div className="absolute inset-0 z-0">
         <LensingGridBackground graphManagerRef={graphManagerRef} layoutMode={layoutMode} />
-        <svg
-          ref={svgRef}
-          className={`w-full h-full transition-opacity duration-200 ${
-            layoutMode === 'structured' ? 'pointer-events-none opacity-0' : 'opacity-100'
-          }`}
-        />
-        {layoutMode === 'structured' && structuredSnapshot && (
-          <StructuredFlowView
-            snapshot={structuredSnapshot}
-            nodeDescriptions={nodeDescriptions}
-            clickedNodeId={clickedNode?.id || null}
-            pathSelectedNodeIds={new Set(pathSelectedNodes.map(node => node.id))}
-            showCrossLinks={showCrossLinks}
-            preferredRootOrder={Array.from(userTypedNodes)}
-            onNodeSelect={(node, event) => {
-              void openNodeDetails(event, node);
-            }}
-            onPaneClick={clearFocusedNode}
-          />
-        )}
+        <svg ref={svgRef} className="w-full h-full" />
       </div>
 
       <SearchOverlay

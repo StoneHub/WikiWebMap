@@ -278,6 +278,14 @@ export class GraphManager {
       .on('tick', () => this.onTick());
   }
 
+  private usesGuidedTreeLayout() {
+    return this.layoutMode !== 'web';
+  }
+
+  private isStructuredMapMode() {
+    return this.layoutMode === 'structured';
+  }
+
   private getMetadata(nodeId: string) {
     return this.nodeMetadata.get(nodeId) || createDefaultNodeMetadata();
   }
@@ -317,6 +325,7 @@ export class GraphManager {
       height: this.height,
       treeSpacing: this.treeSpacing,
       branchSpread: this.branchSpread,
+      layoutMode: this.layoutMode,
     });
 
     this.childrenByParent = forestLayout.childrenByParent;
@@ -343,25 +352,33 @@ export class GraphManager {
     (this.simulation.force('y') as d3.ForceY<Node>).strength((node) => this.getTargetStrength(node));
 
     if (reheat) {
-      this.simulation.alpha(this.layoutMode === 'forest' ? 0.55 : 0.3).restart();
+      const nextAlpha = this.layoutMode === 'forest' ? 0.55 : this.isStructuredMapMode() ? 0.44 : 0.3;
+      this.simulation.alpha(nextAlpha).restart();
     }
   }
 
   private getCollisionRadius(node: Node) {
     const connections = this.degreeById.get(node.id) || 0;
     const meta = this.getMetadata(node.id);
-    const layoutBoost = this.layoutMode === 'forest' && meta.colorRole === 'root' ? 6 : 0;
+    const layoutBoost = this.usesGuidedTreeLayout() && meta.colorRole === 'root'
+      ? (this.isStructuredMapMode() ? 8 : 6)
+      : 0;
     return (Math.min(30 + connections * 0.5, 60) * this.nodeSizeScale) + layoutBoost;
   }
 
   private getChargeStrength(node: Node) {
-    if (this.layoutMode !== 'forest') return -500;
+    if (this.layoutMode === 'web') return -500;
     const meta = this.getMetadata(node.id);
+    if (this.isStructuredMapMode()) {
+      if (meta.colorRole === 'root') return -340;
+      if (meta.layoutDepth !== undefined && meta.layoutDepth > 2) return -190;
+      return -235;
+    }
     return meta.colorRole === 'root' ? -360 : -220;
   }
 
   private getLayoutTarget(node: Node) {
-    if (this.layoutMode !== 'forest') {
+    if (!this.usesGuidedTreeLayout()) {
       return { x: this.width / 2, y: this.height / 2 };
     }
 
@@ -377,15 +394,24 @@ export class GraphManager {
   }
 
   private getTargetStrength(node: Node) {
-    if (this.layoutMode !== 'forest') return 0.02;
+    if (!this.usesGuidedTreeLayout()) return 0.02;
     const meta = this.getMetadata(node.id);
     if (meta.isPinned) return 0.4;
+    if (this.isStructuredMapMode()) {
+      if (meta.colorRole === 'root') return 0.24;
+      return 0.18;
+    }
     if (meta.colorRole === 'root') return 0.18;
     return 0.12;
   }
 
   private getLinkDistance(link: Link) {
-    if (this.layoutMode !== 'forest') return this.nodeSpacing;
+    if (!this.usesGuidedTreeLayout()) return this.nodeSpacing;
+    if (this.isStructuredMapMode()) {
+      return link.layoutRole === 'cross'
+        ? Math.max(this.nodeSpacing * 0.6, 96)
+        : Math.max(this.treeSpacing * 0.74, 118);
+    }
     return link.layoutRole === 'cross'
       ? Math.max(this.nodeSpacing * 0.75, 120)
       : Math.max(this.treeSpacing * 0.58, 92);
@@ -400,7 +426,7 @@ export class GraphManager {
     const targetId = typeof link.target === 'object' ? link.target.id : link.target;
 
     if (this.hiddenNodeIds.has(sourceId) || this.hiddenNodeIds.has(targetId)) return false;
-    if (this.layoutMode === 'forest' && !this.showCrossLinks && link.layoutRole === 'cross') return false;
+    if (this.usesGuidedTreeLayout() && !this.showCrossLinks && link.layoutRole === 'cross') return false;
     return true;
   }
 
@@ -781,7 +807,7 @@ export class GraphManager {
     const node = this.nodes.find((candidate) => candidate.id === nodeId);
     if (!node || node.x === undefined || node.y === undefined) return;
     this.updatePinnedNodePosition(nodeId, { x: node.x, y: node.y });
-    this.refreshDerivedState({ reheat: this.layoutMode === 'forest' });
+    this.refreshDerivedState({ reheat: this.usesGuidedTreeLayout() });
     this.updateDOM();
   }
 
@@ -796,7 +822,7 @@ export class GraphManager {
     });
     node.fx = null;
     node.fy = null;
-    this.refreshDerivedState({ reheat: this.layoutMode === 'forest' });
+    this.refreshDerivedState({ reheat: this.usesGuidedTreeLayout() });
     this.updateDOM();
   }
 
@@ -811,7 +837,7 @@ export class GraphManager {
       ...meta,
       isCollapsed: nextValue,
     });
-    this.refreshDerivedState({ reheat: this.layoutMode === 'forest' });
+    this.refreshDerivedState({ reheat: this.usesGuidedTreeLayout() });
     this.updateDOM();
     return nextValue;
   }
@@ -834,7 +860,7 @@ export class GraphManager {
       node.fx = null;
       node.fy = null;
     });
-    this.refreshDerivedState({ reheat: this.layoutMode === 'forest' });
+    this.refreshDerivedState({ reheat: this.usesGuidedTreeLayout() });
     this.updateDOM();
   }
 
@@ -1221,6 +1247,7 @@ export class GraphManager {
     const isBacklink = typeof d.type === 'string' && d.type.includes('backlink');
     const isCrossLink = d.layoutRole === 'cross';
     const isForestPrimary = this.layoutMode === 'forest' && !isCrossLink;
+    const isStructuredPrimary = this.isStructuredMapMode() && !isCrossLink;
 
     const focusActive = this.focusNodeId !== null;
     const isIncidentToFocus = focusActive && (sourceId === this.focusNodeId || targetId === this.focusNodeId);
@@ -1236,6 +1263,9 @@ export class GraphManager {
     const baseStroke = (() => {
       if (isDimmed) return '#555';
       if (isPathLink) return '#00ff88';
+      if (isStructuredPrimary && originSeed) {
+        return this.hashColor(originSeed, 0.7, 0.64, Math.max(0, Math.min(12, originDepth)) * 7);
+      }
       if (isForestPrimary && originSeed) {
         return this.hashColor(originSeed, 0.84, 0.66, Math.max(0, Math.min(12, originDepth)) * 8);
       }
@@ -1248,6 +1278,7 @@ export class GraphManager {
     const baseStrokeWidth = (() => {
       if (isDimmed) return 1;
       if (isPathLink) return 4;
+      if (isStructuredPrimary) return 3.2;
       if (isForestPrimary) return 3.8;
       if (isCrossLink) return 1.8;
       return isBacklink ? 2 : 3;
@@ -1256,6 +1287,7 @@ export class GraphManager {
     const baseStrokeOpacity = (() => {
       if (isDimmed) return 0.12;
       if (isPathLink) return 0.85;
+      if (isStructuredPrimary) return 0.72;
       if (isForestPrimary) return 0.9;
       if (isCrossLink) return 0.28;
       return isBacklink ? 0.5 : 0.6;
@@ -1407,7 +1439,7 @@ export class GraphManager {
 
       group.attr('opacity', this.getNodeOpacity(meta));
 
-      const radius = this.getCollisionRadius(d) - (this.layoutMode === 'forest' && meta.colorRole === 'root' ? 6 : 0);
+      const radius = this.getCollisionRadius(d) - (this.usesGuidedTreeLayout() && meta.colorRole === 'root' ? 6 : 0);
       const focusScale = this.getFocusScale(meta);
       inner.attr('transform', `scale(${focusScale})`);
 
@@ -1534,11 +1566,11 @@ export class GraphManager {
     if (meta.isBulkSelected) return '#ff8800'; // Orange for bulk-selected
     if (meta.originSeed) {
       const depth = Math.max(0, Math.min(12, meta.layoutDepth ?? meta.originDepth ?? 0));
-      const hueOffset = depth * (this.layoutMode === 'forest' ? 11 : 14);
-      const saturation = this.layoutMode === 'forest'
+      const hueOffset = depth * (this.usesGuidedTreeLayout() ? 11 : 14);
+      const saturation = this.usesGuidedTreeLayout()
         ? Math.max(0.48, 0.86 - depth * 0.04)
         : Math.max(0.42, 0.78 - depth * 0.045);
-      const lightness = this.layoutMode === 'forest'
+      const lightness = this.usesGuidedTreeLayout()
         ? Math.max(0.32, 0.62 - depth * 0.03)
         : Math.max(0.34, 0.56 - depth * 0.02);
       return this.hashColor(meta.originSeed, saturation, lightness, hueOffset);
@@ -1586,8 +1618,8 @@ export class GraphManager {
     if (meta.isBulkSelected) return '#ffff00'; // Yellow stroke for bulk-selected
     if (meta.isCurrentlyExploring) return '#ff6600'; // Orange stroke for exploring
     if (meta.isExpanded) return '#00ffff'; // Cyan for expanded
-    if (this.layoutMode === 'forest' && meta.isPinned) return '#f8fafc';
-    if (this.layoutMode === 'forest' && meta.colorRole === 'root') return '#e2e8f0';
+    if (this.usesGuidedTreeLayout() && meta.isPinned) return '#f8fafc';
+    if (this.usesGuidedTreeLayout() && meta.colorRole === 'root') return '#e2e8f0';
     return '#fff';
   }
 
@@ -1598,8 +1630,8 @@ export class GraphManager {
     if (meta.isPathEndpoint) return 5;
     if (meta.isBulkSelected) return 3;
     if (meta.isExpanded) return 3;
-    if (this.layoutMode === 'forest' && meta.isPinned) return 3;
-    if (this.layoutMode === 'forest' && meta.colorRole === 'root') return 2.5;
+    if (this.usesGuidedTreeLayout() && meta.isPinned) return 3;
+    if (this.usesGuidedTreeLayout() && meta.colorRole === 'root') return 2.5;
     if (meta.isDimmed) return 1;
     return 2;
   }
@@ -1621,7 +1653,7 @@ export class GraphManager {
       .attr('text-anchor', 'middle')
       .attr('fill', '#ffffff')
       .attr('font-size', `${Math.max(7, 9 * this.nodeSizeScale)}px`)
-      .attr('font-weight', this.layoutMode === 'forest' ? 700 : 'bold')
+      .attr('font-weight', this.usesGuidedTreeLayout() ? 700 : 'bold')
       .attr('pointer-events', 'none');
 
     // Simple text wrapping
@@ -1688,7 +1720,7 @@ export class GraphManager {
           event.sourceEvent.preventDefault();
           d.fx = event.x;
           d.fy = event.y;
-          if (this.layoutMode === 'forest') {
+          if (this.usesGuidedTreeLayout()) {
             this.updatePinnedNodePosition(d.id, { x: event.x, y: event.y });
           }
         }
@@ -1701,7 +1733,7 @@ export class GraphManager {
         const distance = Math.sqrt(dx * dx + dy * dy);
 
         if (distance > this.dragThreshold) {
-          if (this.layoutMode === 'forest') {
+          if (this.usesGuidedTreeLayout()) {
             this.updatePinnedNodePosition(d.id, { x: event.x, y: event.y });
             this.refreshDerivedState({ reheat: true });
             this.updateDOM();
@@ -1768,7 +1800,8 @@ export class GraphManager {
       const screenX = transform.applyX(n.x);
       const screenY = transform.applyY(n.y);
       const degree = this.degreeById.get(n.id) || 0;
-      const mass = (0.8 + Math.min(10, degree) * 0.25) * this.nodeSizeScale * (this.layoutMode === 'forest' ? 0.82 : 1);
+      const modeScale = this.layoutMode === 'forest' ? 0.82 : this.isStructuredMapMode() ? 0.88 : 1;
+      const mass = (0.8 + Math.min(10, degree) * 0.25) * this.nodeSizeScale * modeScale;
       result.push({ x: screenX, y: screenY, mass });
     }
     return result;
