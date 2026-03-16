@@ -35,6 +35,24 @@ export const useGraphState = () => {
         };
     };
 
+    const getRootSeedPosition = (
+        anchor: { x: number; y: number },
+        index: number,
+        total: number
+    ) => {
+        if (total <= 1) return anchor;
+
+        const startAngle = total === 2 ? Math.PI : -Math.PI / 2;
+        const angle = startAngle + (index / total) * Math.PI * 2;
+        const radiusX = total === 2 ? 220 : Math.min(250, 185 + total * 12);
+        const radiusY = total === 2 ? 36 : Math.min(210, 136 + total * 11);
+
+        return {
+            x: anchor.x + Math.cos(angle) * radiusX,
+            y: anchor.y + Math.sin(angle) * radiusY,
+        };
+    };
+
     // --- Refs ---
     const graphManagerRef = useRef<GraphManager | null>(null);
     const updateQueueRef = useRef<UpdateQueue | null>(null);
@@ -240,16 +258,12 @@ export const useGraphState = () => {
                 primaryParentId: undefined,
             });
             const existingNodeCount = graphManagerRef.current?.getNodeIds().length || 0;
+            const existingRootCount = userTypedNodes.size;
             const isInitialSeed = existingNodeCount === 0;
             const visibleLinks = isInitialSeed ? links.slice(0, INITIAL_SEED_OUTGOING_LIMIT) : links;
             const visibleBacklinks = isInitialSeed ? backlinks.slice(0, INITIAL_SEED_BACKLINK_LIMIT) : backlinks;
             const viewportCenter = graphManagerRef.current?.getViewportCenter() || { x: 0, y: 0 };
-            const rootAngle = existingNodeCount * 0.85;
-            const rootRadius = existingNodeCount === 0 ? 0 : Math.min(260, 90 + existingNodeCount * 14);
-            const rootPosition = {
-                x: viewportCenter.x + Math.cos(rootAngle) * rootRadius,
-                y: viewportCenter.y + Math.sin(rootAngle) * rootRadius,
-            };
+            const rootPosition = getRootSeedPosition(viewportCenter, existingRootCount, existingRootCount + 1);
             const spawnCount = Math.max(visibleLinks.length + visibleBacklinks.length, 1);
             let spawnIndex = 0;
 

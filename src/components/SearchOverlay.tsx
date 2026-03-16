@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import type { SuggestedPath } from '../data/suggestedPaths';
 
 const QUICK_START_TOPICS = ['Physics', 'Jazz', 'Mount Everest'];
+const PROJECT_GITHUB_URL = 'https://github.com/StoneHub/WikiWebMap';
+const PERSONAL_SITE_URL = 'https://monroes.tech';
 
 const THEME_STYLES: Record<string, string> = {
     science: 'border-cyan-400/25 bg-cyan-400/10 text-cyan-100',
@@ -343,6 +345,33 @@ export const SearchOverlay: React.FC<SearchOverlayProps> = ({
                                 }`}
                         >
                             {error}
+                        </div>
+                    )}
+
+                    {isTouchDevice && mobilePanelExpanded && (
+                        <div className="rounded-2xl border border-slate-700/70 bg-slate-950/45 px-3 py-3 text-xs leading-relaxed text-slate-400">
+                            <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-slate-200">Built by Monroe</span>
+                                <a
+                                    href={PERSONAL_SITE_URL}
+                                    target="_blank"
+                                    rel="me noopener noreferrer"
+                                    className="rounded-full border border-slate-700/70 bg-slate-900/70 px-2.5 py-1 text-[11px] font-medium text-cyan-100 transition hover:border-cyan-400/40 hover:bg-cyan-400/10"
+                                >
+                                    monroes.tech
+                                </a>
+                                <a
+                                    href={PROJECT_GITHUB_URL}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="rounded-full border border-slate-700/70 bg-slate-900/70 px-2.5 py-1 text-[11px] font-medium text-slate-100 transition hover:border-cyan-400/40 hover:bg-cyan-400/10"
+                                >
+                                    GitHub
+                                </a>
+                            </div>
+                            <p className="mt-2 text-[10px] uppercase tracking-[0.18em] text-slate-500">
+                                Independent project using Wikipedia content. Not affiliated with or endorsed by the Wikimedia Foundation.
+                            </p>
                         </div>
                     )}
                 </div>

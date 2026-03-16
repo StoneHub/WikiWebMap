@@ -419,15 +419,43 @@ export class GraphManager {
   private getCollisionRadius(node: Node) {
     const connections = this.degreeById.get(node.id) || 0;
     const meta = this.getMetadata(node.id);
-    const layoutBoost = this.usesGuidedTreeLayout() && meta.colorRole === 'root'
-      ? (this.isStructuredMapMode() ? 8 : 6)
+    const layoutBoost = meta.colorRole === 'root'
+      ? (this.usesGuidedTreeLayout() ? (this.isStructuredMapMode() ? 8 : 6) : 10)
       : 0;
     return (Math.min(30 + connections * 0.5, 60) * this.nodeSizeScale) + layoutBoost;
   }
 
+  private getWebRootAnchor(nodeId: string) {
+    const rootIds = this.nodes
+      .filter((candidate) => !this.hiddenNodeIds.has(candidate.id) && this.getMetadata(candidate.id).colorRole === 'root')
+      .map((candidate) => candidate.id);
+    const index = rootIds.indexOf(nodeId);
+    const center = { x: this.width / 2, y: this.height / 2 };
+
+    if (index === -1 || rootIds.length <= 1) return center;
+
+    const count = rootIds.length;
+    const startAngle = count === 2 ? Math.PI : -Math.PI / 2;
+    const angle = startAngle + (index / count) * Math.PI * 2;
+    const radiusX = count === 2
+      ? Math.max(180, Math.min(this.width * 0.22, 320))
+      : Math.max(180, Math.min(this.width * 0.28, 360));
+    const radiusY = count === 2
+      ? Math.max(24, Math.min(this.height * 0.04, 48))
+      : Math.max(120, Math.min(this.height * 0.24, 260));
+
+    return {
+      x: center.x + Math.cos(angle) * radiusX,
+      y: center.y + Math.sin(angle) * radiusY,
+    };
+  }
+
   private getChargeStrength(node: Node) {
-    if (this.layoutMode === 'web') return -500;
     const meta = this.getMetadata(node.id);
+    if (this.layoutMode === 'web') {
+      if (meta.colorRole === 'root') return -920;
+      return -340;
+    }
     if (this.isStructuredMapMode()) {
       if (meta.colorRole === 'root') return -340;
       if (meta.layoutDepth !== undefined && meta.layoutDepth > 2) return -190;
@@ -437,13 +465,16 @@ export class GraphManager {
   }
 
   private getLayoutTarget(node: Node) {
-    if (!this.usesGuidedTreeLayout()) {
-      return { x: this.width / 2, y: this.height / 2 };
-    }
-
     const meta = this.getMetadata(node.id);
     if (meta.isPinned && meta.manualPosition) {
       return meta.manualPosition;
+    }
+
+    if (!this.usesGuidedTreeLayout()) {
+      if (meta.colorRole === 'root') {
+        return this.getWebRootAnchor(node.id);
+      }
+      return { x: this.width / 2, y: this.height / 2 };
     }
 
     return this.forestTargets.get(node.id) || {
@@ -453,8 +484,12 @@ export class GraphManager {
   }
 
   private getTargetStrength(node: Node) {
-    if (!this.usesGuidedTreeLayout()) return 0.02;
     const meta = this.getMetadata(node.id);
+    if (!this.usesGuidedTreeLayout()) {
+      if (meta.isPinned) return 0.36;
+      if (meta.colorRole === 'root') return 0.1;
+      return 0.008;
+    }
     if (meta.isPinned) return 0.4;
     if (this.isStructuredMapMode()) {
       if (meta.colorRole === 'root') return 0.24;
@@ -465,7 +500,15 @@ export class GraphManager {
   }
 
   private getLinkDistance(link: Link) {
-    if (!this.usesGuidedTreeLayout()) return this.nodeSpacing;
+    if (!this.usesGuidedTreeLayout()) {
+      const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
+      const targetId = typeof link.target === 'object' ? link.target.id : link.target;
+      const sourceMeta = this.getMetadata(sourceId);
+      const targetMeta = this.getMetadata(targetId);
+      const touchesRoot = sourceMeta.colorRole === 'root' || targetMeta.colorRole === 'root';
+      if (link.layoutRole === 'cross') return Math.max(this.nodeSpacing * 0.82, 108);
+      return touchesRoot ? Math.max(this.nodeSpacing * 0.92, 124) : Math.max(this.nodeSpacing * 0.8, 104);
+    }
     if (this.isStructuredMapMode()) {
       return link.layoutRole === 'cross'
         ? Math.max(this.nodeSpacing * 0.6, 96)
@@ -1502,7 +1545,34 @@ export class GraphManager {
 
       const radius = this.getCollisionRadius(d) - (this.usesGuidedTreeLayout() && meta.colorRole === 'root' ? 6 : 0);
       const focusScale = this.getFocusScale(meta);
+      const nodeColor = this.getNodeColor(d.id, meta);
       inner.attr('transform', `scale(${focusScale})`);
+
+      const auraData: Array<{
+        radius: number;
+        fill: string;
+        opacity: number;
+      }> = meta.isFocusTarget
+        ? [{ radius: radius + 16, fill: '#22d3ee', opacity: 0.12 }]
+        : meta.isPathEndpoint
+          ? [{ radius: radius + 14, fill: '#f59e0b', opacity: 0.14 }]
+          : meta.isPinned
+            ? [{ radius: radius + 13, fill: '#e2e8f0', opacity: 0.1 }]
+            : meta.colorRole === 'root'
+              ? [{ radius: radius + 12, fill: nodeColor, opacity: 0.16 }]
+              : [];
+
+      inner
+        .selectAll<SVGCircleElement, typeof auraData[number]>('circle.node-aura')
+        .data(auraData)
+        .join(
+          (enterSelection) => enterSelection.append('circle').attr('class', 'node-aura'),
+          (updateSelection) => updateSelection,
+          (exitSelection) => exitSelection.remove()
+        )
+        .attr('r', (aura) => aura.radius)
+        .attr('fill', (aura) => aura.fill)
+        .attr('fill-opacity', (aura) => aura.opacity);
 
       const outerRingData: Array<{
         radius: number;
@@ -1551,11 +1621,38 @@ export class GraphManager {
           (updateSelection) => updateSelection
         )
         .attr('r', radius)
-        .attr('fill', this.getNodeColor(d.id, meta))
+        .attr('fill', nodeColor)
         .attr('fill-opacity', meta.thumbnail ? 0.3 : 1)
         .attr('stroke', this.getNodeStroke(meta))
         .attr('stroke-width', this.getNodeStrokeWidth(meta))
         .attr('filter', meta.isFocusTarget ? 'url(#focus-glow)' : meta.isFocusNeighbor ? 'url(#neighbor-glow)' : null);
+
+      inner
+        .selectAll<SVGCircleElement, Node>('circle.node-inner-ring')
+        .data([d])
+        .join(
+          (enterSelection) => enterSelection.append('circle').attr('class', 'node-inner-ring'),
+          (updateSelection) => updateSelection
+        )
+        .attr('r', Math.max(8, radius * 0.74))
+        .attr('fill', 'none')
+        .attr('stroke', 'rgba(255,255,255,0.22)')
+        .attr('stroke-width', Math.max(0.9, 1.1 * this.nodeSizeScale))
+        .attr('stroke-opacity', meta.thumbnail ? 0.12 : meta.isDimmed ? 0.1 : 0.24);
+
+      inner
+        .selectAll<SVGEllipseElement, Node>('ellipse.node-sheen')
+        .data([d])
+        .join(
+          (enterSelection) => enterSelection.append('ellipse').attr('class', 'node-sheen'),
+          (updateSelection) => updateSelection
+        )
+        .attr('rx', Math.max(6, radius * 0.38))
+        .attr('ry', Math.max(4, radius * 0.22))
+        .attr('cx', -radius * 0.16)
+        .attr('cy', -radius * 0.22)
+        .attr('fill', 'rgba(255,255,255,0.16)')
+        .attr('fill-opacity', meta.thumbnail ? 0.08 : meta.isDimmed ? 0.06 : 0.16);
 
       this.addTextLabel(inner as any, d.title, radius);
     });

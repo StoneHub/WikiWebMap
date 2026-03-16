@@ -70,8 +70,28 @@ export const NodeDetailsPanel: React.FC<NodeDetailsPanelProps> = ({
                                 className="w-full h-full object-cover"
                             />
                         ) : (
-                            <div className="w-full h-full flex items-center justify-center text-slate-700 text-4xl font-serif italic">
-                                W
+                            <div className="flex h-full w-full items-center justify-center">
+                                <svg
+                                    viewBox="0 0 120 120"
+                                    className="h-20 w-20 text-cyan-300/35"
+                                    aria-hidden="true"
+                                >
+                                    <g fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round">
+                                        <path d="M26 34L58 52L90 30" />
+                                        <path d="M24 72L56 54L92 84" />
+                                        <path d="M26 34L24 72" />
+                                        <path d="M58 52L56 54" />
+                                        <path d="M90 30L92 84" />
+                                    </g>
+                                    <g fill="currentColor">
+                                        <circle cx="26" cy="34" r="8" />
+                                        <circle cx="58" cy="52" r="10" />
+                                        <circle cx="90" cy="30" r="8" />
+                                        <circle cx="24" cy="72" r="8" />
+                                        <circle cx="56" cy="54" r="6" opacity="0.72" />
+                                        <circle cx="92" cy="84" r="9" />
+                                    </g>
+                                </svg>
                             </div>
                         )}
                         <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/35 to-transparent" />

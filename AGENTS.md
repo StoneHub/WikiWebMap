@@ -10,6 +10,7 @@
 - Read `docs/deployment.md` and `docs/release-checklist.md` before changing CI or release behavior.
 - When touching the new layout/mobile flow, read `docs/ux-effects-plan.md`.
 - When touching the React Flow renderer or alternate view modes, read `docs/react-flow-structured-view-plan.md`.
+- When touching public attribution, Wikimedia references, or API-identification behavior, also check `README.md` and `NOTICE`.
 
 ## Working Rules
 - Read the existing code and docs before changing behavior.
@@ -17,6 +18,8 @@
 - If a task spans multiple files, the most likely hotspots are `src/App.tsx`, `src/GraphManager.ts`, `src/components/*`, `src/features/structured-view/*`, `src/hooks/useGraphState.ts`, and matching tests under `src/`.
 - Do not commit generated local artifacts such as `.preview.*` or `.playwright-cli/`.
 - If instructions or release steps seem stale, call that out explicitly in the handoff.
+- For graph-layout changes, sanity-check first-load behavior with at least two root topics in `web` mode before calling the UX done.
+- For Wikimedia/API wording, verify against official Wikimedia policy pages and keep the UI notice, `README.md`, and `NOTICE` aligned.
 
 ## Verification
 - Install dependencies with `npm ci`.

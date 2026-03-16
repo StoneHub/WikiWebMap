@@ -1,6 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { type LayoutMode } from '../features/layout/layoutConfig';
 
+const PROJECT_GITHUB_URL = 'https://github.com/StoneHub/WikiWebMap';
+const PERSONAL_SITE_URL = 'https://monroes.tech';
+
 interface GraphControlsProps {
     showSettings: boolean;
     setShowSettings: (show: boolean) => void;
@@ -554,26 +557,53 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
             )}
 
             {!isTouchDevice && (
-                <div className="flex gap-2 bg-gray-900/80 backdrop-blur-md border border-gray-700/60 rounded-2xl p-2 shadow-2xl pointer-events-auto">
-                    <button
-                        onClick={onPruneLeaves}
-                        disabled={!canPruneLeaves}
-                        className="h-10 sm:h-12 px-3 sm:px-5 bg-gray-800/80 hover:bg-gray-700/80 border border-gray-600/50 rounded-xl shadow-xl flex items-center justify-center gap-1.5 sm:gap-2 text-gray-200 hover:text-white transition-all hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-gray-800/80 disabled:hover:text-gray-200"
-                        title="Remove nodes with fewer than 2 connections"
-                    >
-                        <span className="text-base sm:text-lg">✂️</span>
-                        <span className="font-semibold text-xs sm:text-sm">Prune</span>
-                    </button>
+                <div className="pointer-events-auto flex flex-col gap-3">
+                    <div className="flex gap-2 bg-gray-900/80 backdrop-blur-md border border-gray-700/60 rounded-2xl p-2 shadow-2xl">
+                        <button
+                            onClick={onPruneLeaves}
+                            disabled={!canPruneLeaves}
+                            className="h-10 sm:h-12 px-3 sm:px-5 bg-gray-800/80 hover:bg-gray-700/80 border border-gray-600/50 rounded-xl shadow-xl flex items-center justify-center gap-1.5 sm:gap-2 text-gray-200 hover:text-white transition-all hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-gray-800/80 disabled:hover:text-gray-200"
+                            title="Remove nodes with fewer than 2 connections"
+                        >
+                            <span className="text-base sm:text-lg">✂️</span>
+                            <span className="font-semibold text-xs sm:text-sm">Prune</span>
+                        </button>
 
-                    <button
-                        onClick={onDeleteSelection}
-                        disabled={!canDeleteSelection}
-                        className="h-10 sm:h-12 px-3 sm:px-5 bg-gray-800/70 hover:bg-red-900/80 border border-gray-600/50 hover:border-red-500/50 rounded-xl shadow-xl flex items-center justify-center gap-1.5 sm:gap-2 text-gray-200 hover:text-white transition-all hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-gray-800/70 disabled:hover:text-gray-200 disabled:hover:border-gray-600/50"
-                        title={canDeleteSelection ? 'Delete Alt/Option+Drag selected nodes' : 'Select nodes on desktop before deleting'}
-                    >
-                        <span className="text-base sm:text-lg">🗑️</span>
-                        <span className="font-semibold text-xs sm:text-sm">Delete Selection</span>
-                    </button>
+                        <button
+                            onClick={onDeleteSelection}
+                            disabled={!canDeleteSelection}
+                            className="h-10 sm:h-12 px-3 sm:px-5 bg-gray-800/70 hover:bg-red-900/80 border border-gray-600/50 hover:border-red-500/50 rounded-xl shadow-xl flex items-center justify-center gap-1.5 sm:gap-2 text-gray-200 hover:text-white transition-all hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-gray-800/70 disabled:hover:text-gray-200 disabled:hover:border-gray-600/50"
+                            title={canDeleteSelection ? 'Delete Alt/Option+Drag selected nodes' : 'Select nodes on desktop before deleting'}
+                        >
+                            <span className="text-base sm:text-lg">🗑️</span>
+                            <span className="font-semibold text-xs sm:text-sm">Delete Selection</span>
+                        </button>
+                    </div>
+
+                    <div className="max-w-[21rem] rounded-2xl border border-gray-700/60 bg-gray-900/80 px-3 py-3 text-xs leading-relaxed text-slate-400 shadow-2xl backdrop-blur-md">
+                        <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-slate-200">Built by Monroe</span>
+                            <a
+                                href={PERSONAL_SITE_URL}
+                                target="_blank"
+                                rel="me noopener noreferrer"
+                                className="rounded-full border border-slate-700/70 bg-slate-900/70 px-2.5 py-1 text-[11px] font-medium text-cyan-100 transition hover:border-cyan-400/40 hover:bg-cyan-400/10"
+                            >
+                                monroes.tech
+                            </a>
+                            <a
+                                href={PROJECT_GITHUB_URL}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="rounded-full border border-slate-700/70 bg-slate-900/70 px-2.5 py-1 text-[11px] font-medium text-slate-100 transition hover:border-cyan-400/40 hover:bg-cyan-400/10"
+                            >
+                                GitHub
+                            </a>
+                        </div>
+                        <p className="mt-2 text-[10px] uppercase tracking-[0.18em] text-slate-500">
+                            Independent project using Wikipedia content. Not affiliated with or endorsed by the Wikimedia Foundation.
+                        </p>
+                    </div>
                 </div>
             )}
         </div>

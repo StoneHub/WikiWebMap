@@ -3,6 +3,8 @@
 Explore Wikipedia topics as an interactive graph: expand nodes, search for connections between topics, and visualize link context.
 
 Live: `https://wikiconnectionsmap.web.app/`
+Website: `https://monroes.tech`
+GitHub: `https://github.com/StoneHub/WikiWebMap`
 
 ## Quickstart
 
@@ -48,5 +50,12 @@ Live: `https://wikiconnectionsmap.web.app/`
 ## License
 Apache-2.0. See `LICENSE`.
 
+## Ownership, API, and Wikimedia Notice
+- This repo is currently Apache-2.0. That means attribution and branding help establish authorship, but they do not prevent someone else from reusing or forking the code under the license terms.
+- Set `VITE_WIKI_API_CONTACT_EMAIL` so requests send a descriptive `Api-User-Agent` header to Wikipedia.
+- The app rate-limits and caches Wikipedia requests, and `VITE_RECAPTCHA_SITE_KEY` can be used to reduce automated abuse on the client side.
+- Wikipedia is a trademark of the Wikimedia Foundation. WikiWebMap is an independent project and is not affiliated with or endorsed by the Wikimedia Foundation.
+
 ## Attribution
-- Wikipedia/Wikimedia content is licensed under CC BY-SA 4.0. This project is not affiliated with the Wikimedia Foundation.
+- Wikipedia/Wikimedia content is licensed under CC BY-SA 4.0.
+- This project is not affiliated with or endorsed by the Wikimedia Foundation.

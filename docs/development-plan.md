@@ -9,6 +9,9 @@ This repo is now in a safer release-ready state than it was at clone time:
 - Mobile guidance and destructive actions are safer.
 - The repo now has unit coverage for `WikiService`, `runPathfinder`, and `useGraphState` reset/restore behavior.
 - Session diagnostics now include both connection logs and captured client runtime errors.
+- `web` mode now seeds root topics from root-count-aware positions instead of total-node-count drift, which keeps first-load layouts more balanced.
+- Project attribution and external links now live with the bottom-left graph tools on desktop, with matching ownership/Wikimedia notice language in the UI and docs.
+- Neutral placeholder art now avoids leaning on Wikimedia-looking fallback branding when a topic has no thumbnail.
 
 Renderer planning note:
 - The next radically different visualization experiment is a React Flow-based `Structured View`; see `docs/react-flow-structured-view-plan.md`.
@@ -114,6 +117,12 @@ Recommended order:
 | P5 | Architecture | Break up `App.tsx` and `GraphManager.ts` | Lowers regression risk for future work | Large | Medium | Phase 4 |
 | P6 | UX | Improve onboarding and mobile drawer polish | Increases usability and product trust | Medium | Low | Phase 5 |
 | P7 | Observability | Add remote client error reporting | Makes live issues easier to diagnose after release | Medium | Low | Phase 5 |
+
+## Immediate next improvements
+
+1. Add a one-click `Spread Roots` action so users can quickly recreate the “pull major topics apart, let the inner nodes congregate” layout they naturally discovered.
+2. Turn current link-strength scoring into clearer visual language with a legend entry for strong ties, shared-neighbor ties, and cross-branch bridges.
+3. Add a small server-side or edge cache/proxy layer for Wikipedia requests so abuse control, request budgets, and API identification are no longer purely client-enforced.
 
 ## Branch strategy
 

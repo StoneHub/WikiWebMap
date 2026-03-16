@@ -28,6 +28,8 @@ try {
   const page = await browser.newPage({ viewport: { width: 1365, height: 900 } });
   await slowWikipediaRequests(page);
   await page.goto(baseUrl, { waitUntil: 'networkidle' });
+  await page.getByRole('link', { name: 'monroes.tech' }).waitFor({ timeout: 15000 });
+  await page.getByRole('link', { name: 'GitHub' }).waitFor({ timeout: 15000 });
 
   await page.getByRole('textbox', { name: 'Search a Wikipedia topic' }).fill('Physics');
   await page.getByRole('button', { name: 'Start Exploration' }).click();

@@ -31,6 +31,10 @@ Core principles:
 - New users do not get a strong explanation of what to do first.
 - Suggested paths help, but the screen still relies on inference.
 
+### 1a. First-load spatial rhythm still needs refinement
+- Root topics now seed more intelligently, but web mode still needs stronger first-load balance when multiple major topics are added quickly.
+- The most successful layouts still happen after a user drags roots outward and lets inner topics settle between them.
+
 ### 2. Mobile feels functional, not polished
 - The mobile sheets are safer now, but they still feel like adapted desktop UI.
 - Important actions are present, but the experience is not yet elegant.
@@ -38,6 +42,10 @@ Core principles:
 ### 3. Visual hierarchy is flat in places
 - The search box, graph, connection context, settings, and diagnostics all compete.
 - There is not yet a strong “primary task” rhythm on load.
+
+### 3a. Topic visuals are improving but still have room to mature
+- Nodes now have softer halos and better root emphasis, but the graph still does not fully communicate connection importance at a glance.
+- Link weight and branch significance are still more present in the data than in the visuals.
 
 ### 4. Motion is mostly utilitarian
 - The graph has energy, but UI transitions and contextual reveals are still basic.
@@ -47,6 +55,23 @@ Core principles:
 - The product is closer to professional release quality now, but the brand/system still needs a more cohesive finish.
 
 ## Recommended rollout
+
+### Phase 0: Space and trust pass
+Goal:
+- Make the first-loaded graph feel more balanced and make project ownership/independence clearer without crowding the main panel.
+
+Changes:
+- Keep root topics on soft perimeter anchors in `web` mode instead of letting total node count fling them outward.
+- Preserve the lower-left authorship/trust strip as part of the graph tool area rather than the intro panel.
+- Continue using neutral custom placeholder artwork instead of anything that could read as Wikimedia branding.
+
+Suggested UI work:
+- Tune soft-anchor strength and perimeter radius logic in [GraphManager.ts](/C:/Users/monro/Codex/WikiWebMap/src/GraphManager.ts)
+- Tune first-seed and multi-seed spawn logic in [useGraphState.ts](/C:/Users/monro/Codex/WikiWebMap/src/hooks/useGraphState.ts)
+- Keep attribution and external-link surfaces coordinated between [GraphControls.tsx](/C:/Users/monro/Codex/WikiWebMap/src/components/GraphControls.tsx), [SearchOverlay.tsx](/C:/Users/monro/Codex/WikiWebMap/src/components/SearchOverlay.tsx), and [README.md](/C:/Users/monro/Codex/WikiWebMap/README.md)
+
+Risk:
+- Low
 
 ### Phase 1: Clarity pass
 Goal:
@@ -151,11 +176,11 @@ Risk:
 ## High-impact UX tasks
 
 ### Top 5 to do next
-1. Add a stronger first-run search/onboarding block in [SearchOverlay.tsx](/C:/Users/monro/Codex/WikiWebMap/src/components/SearchOverlay.tsx)
+1. Add a “root spread” assist in [GraphManager.ts](/C:/Users/monro/Codex/WikiWebMap/src/GraphManager.ts) so major topics land in cleaner perimeter positions before the user drags them
 2. Convert connection context into a more deliberate mobile/desktop drawer pattern in [ConnectionStatusBar.tsx](/C:/Users/monro/Codex/WikiWebMap/src/components/ConnectionStatusBar.tsx)
-3. Add motion rules and shared transitions in [index.css](/C:/Users/monro/Codex/WikiWebMap/src/index.css)
+3. Add weighted link styling and legend language so strong/shared-topic bridges read immediately in [GraphManager.ts](/C:/Users/monro/Codex/WikiWebMap/src/GraphManager.ts) and [GraphControls.tsx](/C:/Users/monro/Codex/WikiWebMap/src/components/GraphControls.tsx)
 4. Polish the node details sheet in [NodeDetailsPanel.tsx](/C:/Users/monro/Codex/WikiWebMap/src/components/NodeDetailsPanel.tsx)
-5. Add a more expressive path-result reveal in [GraphManager.ts](/C:/Users/monro/Codex/WikiWebMap/src/GraphManager.ts)
+5. Add motion rules and shared transitions in [index.css](/C:/Users/monro/Codex/WikiWebMap/src/index.css)
 
 ## Safe implementation order
 
