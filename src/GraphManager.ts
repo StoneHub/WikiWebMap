@@ -116,6 +116,15 @@ type LinkInsight = {
   strength: number;
 };
 
+export type LinkInsightSummary = {
+  role: 'primary' | 'cross' | 'backlink' | 'path';
+  tier: 'light' | 'moderate' | 'strong';
+  sharedNeighbors: number;
+  sharedNeighborRatio: number;
+  isReciprocal: boolean;
+  strength: number;
+};
+
 /**
  * GraphManager - Imperative D3 graph management
  * Owns the simulation and DOM, provides methods for incremental updates
@@ -1946,6 +1955,40 @@ export class GraphManager {
 
   getLinkById(linkId: string): Link | undefined {
     return this.links.find(l => l.id === linkId);
+  }
+
+  getLinkInsightSummary(linkId: string): LinkInsightSummary | undefined {
+    const link = this.getLinkById(linkId);
+    if (!link) return undefined;
+
+    const insight = this.getLinkInsight(link);
+    const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
+    const targetId = typeof link.target === 'object' ? link.target.id : link.target;
+    const sourceMeta = this.nodeMetadata.get(sourceId);
+    const targetMeta = this.nodeMetadata.get(targetId);
+    const isPathLink = Boolean(sourceMeta?.isInPath && targetMeta?.isInPath);
+    const isBacklink = typeof link.type === 'string' && link.type.includes('backlink');
+    const role: LinkInsightSummary['role'] = isPathLink
+      ? 'path'
+      : isBacklink
+        ? 'backlink'
+        : link.layoutRole === 'cross'
+          ? 'cross'
+          : 'primary';
+    const tier: LinkInsightSummary['tier'] = insight.strength >= 0.72 || insight.sharedNeighbors >= 3
+      ? 'strong'
+      : insight.strength >= 0.46 || insight.sharedNeighbors >= 1
+        ? 'moderate'
+        : 'light';
+
+    return {
+      role,
+      tier,
+      sharedNeighbors: insight.sharedNeighbors,
+      sharedNeighborRatio: insight.sharedNeighborRatio,
+      isReciprocal: insight.isReciprocal,
+      strength: insight.strength,
+    };
   }
 
   getLensingNodes(): Array<{ x: number; y: number; mass: number }> {

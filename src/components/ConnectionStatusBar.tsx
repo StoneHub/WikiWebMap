@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import type { Link } from '../GraphManager';
+import type { Link, LinkInsightSummary } from '../GraphManager';
 
 export function ConnectionStatusBar(props: {
   link: Link | null;
+  linkInsight?: LinkInsightSummary;
   pinnedLinks: Link[];
   selectedPinnedLinkId: string | null;
   isTouchDevice: boolean;
@@ -53,12 +54,46 @@ export function ConnectionStatusBar(props: {
 
   const isPinned = Boolean(link && props.pinnedLinks.some(l => l.id === link.id));
   const hasLongContext = Boolean(link?.context && link.context.length > 180);
+  const linkInsight = props.linkInsight;
   const wrapperClassName = props.isTouchDevice
     ? 'fixed inset-x-3 bottom-[6.8rem] z-30 pointer-events-none'
     : 'fixed left-3 right-3 bottom-3 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 z-40 sm:w-[min(720px,calc(100vw-1.5rem))] pointer-events-none';
   const panelClassName = props.isTouchDevice
     ? 'pointer-events-auto rounded-[1.75rem] border border-gray-700/60 bg-gray-900/90 px-4 py-4 shadow-[0_20px_60px_rgba(2,6,23,0.55)] backdrop-blur-md'
     : 'pointer-events-auto bg-gray-900/85 backdrop-blur-md border border-gray-700/60 rounded-2xl shadow-2xl px-4 py-3';
+
+  const relationshipLabel = (() => {
+    if (!linkInsight) return null;
+    if (linkInsight.role === 'path') return 'Path bridge';
+    if (linkInsight.role === 'backlink') return linkInsight.isReciprocal ? 'Mutual backlink' : 'Incoming reference';
+    if (linkInsight.role === 'cross') {
+      return linkInsight.tier === 'strong' ? 'Strong bridge' : 'Bridge link';
+    }
+    return linkInsight.tier === 'strong'
+      ? 'Strong tie'
+      : linkInsight.tier === 'moderate'
+        ? 'Related topics'
+        : 'Light tie';
+  })();
+
+  const relationshipCopy = (() => {
+    if (!linkInsight) return null;
+    if (linkInsight.role === 'path') {
+      return 'This highlighted edge is part of the active bridge the pathfinder reconstructed.';
+    }
+    if (linkInsight.role === 'cross') {
+      return linkInsight.sharedNeighbors > 0
+        ? `This bridge jumps between branches and still shares ${linkInsight.sharedNeighbors} nearby topic${linkInsight.sharedNeighbors === 1 ? '' : 's'}.`
+        : 'This bridge jumps between branches even though the local neighborhoods stay fairly distinct.';
+    }
+    if (linkInsight.sharedNeighbors > 0) {
+      return `These topics share ${linkInsight.sharedNeighbors} nearby Wikipedia topic${linkInsight.sharedNeighbors === 1 ? '' : 's'}, which is why this connection renders more strongly.`;
+    }
+    if (linkInsight.isReciprocal) {
+      return 'These articles point back to each other, so the relationship gets a stronger visual treatment.';
+    }
+    return 'This is a lighter connection with less local overlap than the stronger highlighted ties.';
+  })();
 
   return (
     <div className={wrapperClassName}>
@@ -124,23 +159,42 @@ export function ConnectionStatusBar(props: {
               )}
             </div>
             {link ? (
-              <div className="mt-2 text-sm font-semibold text-white leading-relaxed">
-                <button
-                  onClick={() => props.onFocusNode(source)}
-                  className="underline decoration-white/20 hover:decoration-white/60"
-                  title="Focus this topic in the map"
-                >
-                  {source}
-                </button>{' '}
-                <span className="text-gray-300">{direction}</span>{' '}
-                <button
-                  onClick={() => props.onFocusNode(target)}
-                  className="underline decoration-white/20 hover:decoration-white/60"
-                  title="Focus this topic in the map"
-                >
-                  {target}
-                </button>
-              </div>
+              <>
+                <div className="mt-2 text-sm font-semibold text-white leading-relaxed">
+                  <button
+                    onClick={() => props.onFocusNode(source)}
+                    className="underline decoration-white/20 hover:decoration-white/60"
+                    title="Focus this topic in the map"
+                  >
+                    {source}
+                  </button>{' '}
+                  <span className="text-gray-300">{direction}</span>{' '}
+                  <button
+                    onClick={() => props.onFocusNode(target)}
+                    className="underline decoration-white/20 hover:decoration-white/60"
+                    title="Focus this topic in the map"
+                  >
+                    {target}
+                  </button>
+                </div>
+                {relationshipLabel && (
+                  <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-slate-200">
+                    <span className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-2.5 py-1 text-cyan-100">
+                      {relationshipLabel}
+                    </span>
+                    {linkInsight && linkInsight.sharedNeighbors > 0 && (
+                      <span className="rounded-full border border-slate-700/70 bg-black/20 px-2.5 py-1 text-slate-200">
+                        Shared neighbors: {linkInsight.sharedNeighbors}
+                      </span>
+                    )}
+                    {linkInsight?.isReciprocal && (
+                      <span className="rounded-full border border-amber-400/20 bg-amber-400/10 px-2.5 py-1 text-amber-100">
+                        Mutual references
+                      </span>
+                    )}
+                  </div>
+                )}
+              </>
             ) : (
               <div className="mt-2 text-sm font-semibold text-white">
                 Select a pinned connection.
@@ -170,7 +224,7 @@ export function ConnectionStatusBar(props: {
         <div className="mt-3 bg-black/30 rounded-2xl border border-gray-700/50 px-3 py-3">
           <div className="mb-2 flex items-center justify-between gap-3">
             <div className="text-[10px] uppercase tracking-[0.22em] text-gray-400">
-              Article Snippet
+              Why These Topics Connect
             </div>
             {hasLongContext && !isLoading && (
               <button
@@ -195,8 +249,15 @@ export function ConnectionStatusBar(props: {
               </div>
             </div>
           ) : (
-            <div className={`text-[12px] text-gray-200 leading-relaxed italic ${showFullContext ? '' : 'line-clamp-3'}`}>
-              “{link?.context}”
+            <div className="space-y-3">
+              {relationshipCopy && (
+                <div className="rounded-xl border border-cyan-400/15 bg-cyan-400/5 px-3 py-2 text-[11px] leading-relaxed text-slate-200">
+                  {relationshipCopy}
+                </div>
+              )}
+              <div className={`text-[12px] text-gray-200 leading-relaxed italic ${showFullContext ? '' : 'line-clamp-3'}`}>
+                “{link?.context}”
+              </div>
             </div>
           )}
         </div>

@@ -47,6 +47,10 @@ Core principles:
 - Nodes now have softer halos and better root emphasis, but the graph still does not fully communicate connection importance at a glance.
 - Link weight and branch significance are still more present in the data than in the visuals.
 
+### 3b. Search activity should feel like product guidance, not a debug console
+- The old terminal look is gone, but the activity panel can still get smarter about when to stay quiet, when to summarize, and when to reveal deeper detail.
+- Search controls should feel integrated with discovery, not like a separate developer tool floating above it.
+
 ### 4. Motion is mostly utilitarian
 - The graph has energy, but UI transitions and contextual reveals are still basic.
 - There is room for effects that make cause-and-effect easier to understand.
@@ -126,6 +130,7 @@ Suggested effects:
 - Search panel fade/slide on first load
 - Node details sheet spring-in on mobile
 - Context drawer expand/collapse animation
+- Search Activity panel state transitions that gracefully collapse from active search to standby summary
 - Path result pulse or trace effect in [GraphManager.ts](/C:/Users/monro/Codex/WikiWebMap/src/GraphManager.ts)
 - Softer background parallax or light-field drift in [LensingGridBackground.tsx](/C:/Users/monro/Codex/WikiWebMap/src/components/LensingGridBackground.tsx)
 
@@ -178,7 +183,7 @@ Risk:
 ### Top 5 to do next
 1. Add a “root spread” assist in [GraphManager.ts](/C:/Users/monro/Codex/WikiWebMap/src/GraphManager.ts) so major topics land in cleaner perimeter positions before the user drags them
 2. Convert connection context into a more deliberate mobile/desktop drawer pattern in [ConnectionStatusBar.tsx](/C:/Users/monro/Codex/WikiWebMap/src/components/ConnectionStatusBar.tsx)
-3. Add weighted link styling and legend language so strong/shared-topic bridges read immediately in [GraphManager.ts](/C:/Users/monro/Codex/WikiWebMap/src/GraphManager.ts) and [GraphControls.tsx](/C:/Users/monro/Codex/WikiWebMap/src/components/GraphControls.tsx)
+3. Make the `Search Activity` panel smarter about automatic collapse, session presets, and result summaries in [SearchStatusOverlay.tsx](/C:/Users/monro/Codex/WikiWebMap/src/components/SearchStatusOverlay.tsx)
 4. Polish the node details sheet in [NodeDetailsPanel.tsx](/C:/Users/monro/Codex/WikiWebMap/src/components/NodeDetailsPanel.tsx)
 5. Add motion rules and shared transitions in [index.css](/C:/Users/monro/Codex/WikiWebMap/src/index.css)
 

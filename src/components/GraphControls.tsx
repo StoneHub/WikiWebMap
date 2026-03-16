@@ -125,19 +125,19 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                 <div className="flex items-center justify-between">
                     <span className="text-gray-300">Primary branches</span>
                     <svg width="84" height="12" className="opacity-90">
-                        <line x1="2" y1="6" x2="82" y2="6" stroke="#7dd3fc" strokeWidth="4" strokeLinecap="round" />
+                        <line x1="2" y1="6" x2="82" y2="6" stroke="#7dd3fc" strokeWidth="3.5" strokeLinecap="round" />
                     </svg>
                 </div>
                 <div className="flex items-center justify-between">
-                    <span className="text-gray-300">Cross-tree links</span>
+                    <span className="text-gray-300">Strong ties</span>
                     <svg width="84" height="12" className="opacity-90">
-                        <line x1="2" y1="6" x2="82" y2="6" stroke="#cbd5e1" strokeWidth="2" strokeDasharray="2 8" strokeLinecap="round" />
+                        <line x1="2" y1="6" x2="82" y2="6" stroke="#67e8f9" strokeWidth="5" strokeLinecap="round" />
                     </svg>
                 </div>
                 <div className="flex items-center justify-between">
-                    <span className="text-gray-300">Guided branches</span>
+                    <span className="text-gray-300">Cross-branch bridges</span>
                     <svg width="84" height="12" className="opacity-90">
-                        <line x1="2" y1="6" x2="82" y2="6" stroke="#a3a3a3" strokeWidth="3" strokeLinecap="round" />
+                        <line x1="2" y1="6" x2="82" y2="6" stroke="#cbd5e1" strokeWidth="2.2" strokeDasharray="3 7" strokeLinecap="round" />
                     </svg>
                 </div>
                 <div className="flex items-center justify-between">
@@ -160,7 +160,7 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                 </div>
             </div>
             <div className="mt-3 pt-3 border-t border-gray-700/50 text-[11px] text-gray-300 leading-relaxed">
-                Guided mode keeps the draggable node map, but adds stronger branch anchors and quieter bridge links so the graph stays readable while you rearrange it. Wider, brighter links hint at tighter local overlap between topics.
+                Wider, brighter links mark tighter overlap between topics, often because they share nearby pages or point at each other. Dashed bridge links show branch-to-branch jumps, while amber links mark incoming references.
             </div>
         </>
     );

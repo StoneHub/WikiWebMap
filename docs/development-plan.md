@@ -12,6 +12,8 @@ This repo is now in a safer release-ready state than it was at clone time:
 - `web` mode now seeds root topics from root-count-aware positions instead of total-node-count drift, which keeps first-load layouts more balanced.
 - Project attribution and external links now live with the bottom-left graph tools on desktop, with matching ownership/Wikimedia notice language in the UI and docs.
 - Neutral placeholder art now avoids leaning on Wikimedia-looking fallback branding when a topic has no thumbnail.
+- Link-strength cues are now surfaced in both the legend and connection drawer, so “strong ties” are no longer hidden inside rendering math alone.
+- The old green `Search Terminal` is now a calmer `Search Activity` panel with automatic queue messaging, optional detail logs, and duplicate-search prevention.
 
 Renderer planning note:
 - The next radically different visualization experiment is a React Flow-based `Structured View`; see `docs/react-flow-structured-view-plan.md`.
@@ -121,8 +123,9 @@ Recommended order:
 ## Immediate next improvements
 
 1. Add a one-click `Spread Roots` action so users can quickly recreate the “pull major topics apart, let the inner nodes congregate” layout they naturally discovered.
-2. Turn current link-strength scoring into clearer visual language with a legend entry for strong ties, shared-neighbor ties, and cross-branch bridges.
-3. Add a small server-side or edge cache/proxy layer for Wikipedia requests so abuse control, request budgets, and API identification are no longer purely client-enforced.
+2. Add a small server-side or edge cache/proxy layer for Wikipedia requests so abuse control, request budgets, and API identification are no longer purely client-enforced.
+3. Let users pin a `search recipe` from the activity panel, such as “find alternate bridges” or “pause after first result,” so repeated exploration sessions feel more intentional.
+4. Add a `connection lens` mode that temporarily brightens only the strongest ties around a focused topic.
 
 ## Branch strategy
 

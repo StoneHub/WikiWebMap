@@ -45,6 +45,7 @@ GitHub: `https://github.com/StoneHub/WikiWebMap`
 - Drag canvas to pan; scroll to zoom.
 - Click a node to open details and actions.
 - Select up to 2 nodes to search for connections. On desktop you can Shift+Click nodes; on touch devices you can use the node details panel.
+- Queued bridge searches run automatically, and the `Search Activity` panel shows progress, pause/resume controls, and whether alternate-bridge search is enabled.
 - Alt/Option+Drag box-selects nodes for bulk actions on desktop.
 
 ## License

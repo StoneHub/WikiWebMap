@@ -16,6 +16,7 @@
 - Read the existing code and docs before changing behavior.
 - Prefer minimal, local changes over broad rewrites.
 - If a task spans multiple files, the most likely hotspots are `src/App.tsx`, `src/GraphManager.ts`, `src/components/*`, `src/features/structured-view/*`, `src/hooks/useGraphState.ts`, and matching tests under `src/`.
+- Search/pathfinding UX work most often lands in `src/components/SearchStatusOverlay.tsx`, `src/components/ConnectionStatusBar.tsx`, and the path/queue orchestration inside `src/App.tsx`.
 - Do not commit generated local artifacts such as `.preview.*` or `.playwright-cli/`.
 - If instructions or release steps seem stale, call that out explicitly in the handoff.
 - For graph-layout changes, sanity-check first-load behavior with at least two root topics in `web` mode before calling the UX done.

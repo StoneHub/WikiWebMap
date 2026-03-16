@@ -723,13 +723,30 @@ const WikiWebExplorer = () => {
       },
     });
 
+  const getSearchKey = (from: string, to: string) =>
+    `${from.trim().toLowerCase()}→${to.trim().toLowerCase()}`;
+
   const enqueueSearch = async (from: string, to: string, source: 'suggested' | 'shift') => {
     const passedVerification = await RecaptchaService.verify('pathfinding');
     if (!passedVerification) {
       setError('Bot verification failed. Please try again.');
       return;
     }
+
+    const requestedKey = getSearchKey(from, to);
+    const activeKey = activeSearch ? getSearchKey(activeSearch.from, activeSearch.to) : null;
+    const duplicateQueued = searchQueueRef.current.some((job) => getSearchKey(job.from, job.to) === requestedKey);
+    if (activeKey === requestedKey || duplicateQueued) {
+      setError('That search is already running or queued.');
+      setSearchTerminalMinimized(false);
+      return;
+    }
+
     setSearchQueue(prev => {
+      if (prev.some((job) => getSearchKey(job.from, job.to) === requestedKey)) {
+        setError('That search is already queued.');
+        return prev;
+      }
       if (prev.length >= 3 || searchQueueRef.current.length >= 3) {
         setError('Search queue full (max 3).');
         return prev;
@@ -824,6 +841,9 @@ const WikiWebExplorer = () => {
   const pinnedLinks = pinnedState.ids
     .map(id => graphManagerRef.current?.getLinkById(id))
     .filter((x): x is Link => Boolean(x));
+  const displayedLinkInsight = displayedLinkId
+    ? graphManagerRef.current?.getLinkInsightSummary(displayedLinkId)
+    : undefined;
   const clickedNodeMeta = clickedNode
     ? graphManagerRef.current?.getNodeMetadata(clickedNode.id)
     : undefined;
@@ -973,6 +993,7 @@ const WikiWebExplorer = () => {
 
       <ConnectionStatusBar
         link={displayedLink}
+        linkInsight={displayedLinkInsight}
         pinnedLinks={pinnedLinks}
         selectedPinnedLinkId={pinnedState.selectedId}
         isTouchDevice={isTouchDevice}
