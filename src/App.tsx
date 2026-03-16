@@ -18,6 +18,13 @@ import { RecaptchaService } from './services/RecaptchaService';
 import { clientErrorReporter } from './services/ClientErrorReporter';
 import { useGraphState, type AppSnapshot } from './hooks/useGraphState';
 import { runtimeConfig } from './config/runtimeConfig';
+import {
+  DEFAULT_BRANCH_SPREAD,
+  DEFAULT_SHOW_CROSS_LINKS,
+  DEFAULT_TREE_SPACING,
+  getDefaultLayoutMode,
+  type LayoutMode,
+} from './features/layout/layoutConfig';
 
 type SearchJob = {
   id: string;
@@ -69,6 +76,7 @@ const WikiWebExplorer = () => {
     deleteNodeImperative,
     pruneGraph,
     pruneLeafNodes,
+    pruneBranch,
     undo,
     redo,
     pushHistory,
@@ -148,7 +156,24 @@ const WikiWebExplorer = () => {
   });
 
   // Visual settings
+  const [layoutMode, setLayoutMode] = useState<LayoutMode>(() => {
+    const stored = localStorage.getItem('wikiLayoutMode');
+    if (stored === 'web' || stored === 'forest') return stored;
+    return getDefaultLayoutMode(import.meta.env.DEV);
+  });
   const [nodeSpacing, setNodeSpacing] = useState(150);
+  const [treeSpacing, setTreeSpacing] = useState(() => {
+    const raw = Number(localStorage.getItem('wikiTreeSpacing'));
+    return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_TREE_SPACING;
+  });
+  const [branchSpread, setBranchSpread] = useState(() => {
+    const raw = Number(localStorage.getItem('wikiBranchSpread'));
+    return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_BRANCH_SPREAD;
+  });
+  const [showCrossLinks, setShowCrossLinks] = useState(() => {
+    const raw = localStorage.getItem('wikiShowCrossLinks');
+    return raw === null ? DEFAULT_SHOW_CROSS_LINKS : raw === 'true';
+  });
   const [recursionDepth, setRecursionDepth] = useState(3);
   const [nodeSizeScale, setNodeSizeScale] = useState(1);
 
@@ -164,6 +189,9 @@ const WikiWebExplorer = () => {
   const searchDebounceTimeoutRef = useRef<number | null>(null);
   const searchSnapshotRef = useRef<AppSnapshot | null>(null);
   const restoreSearchSnapshotRef = useRef(false);
+  const refreshClickedNode = useCallback(() => {
+    setClickedNode(prev => (prev ? { ...prev } : prev));
+  }, [setClickedNode]);
 
   useEffect(() => {
     searchQueueRef.current = searchQueue;
@@ -337,6 +365,49 @@ const WikiWebExplorer = () => {
     dispatchPinned({ type: 'clear' });
   };
 
+  const handleToggleNodePin = useCallback(() => {
+    if (!clickedNode || !graphManagerRef.current) return;
+    pushHistory();
+    if (graphManagerRef.current.isNodePinned(clickedNode.id)) {
+      graphManagerRef.current.unpinNode(clickedNode.id);
+      setError(`Released "${clickedNode.title}" from its pinned position.`);
+    } else {
+      graphManagerRef.current.pinNode(clickedNode.id);
+      setError(`Pinned "${clickedNode.title}" in place.`);
+    }
+    refreshClickedNode();
+  }, [clickedNode, graphManagerRef, pushHistory, refreshClickedNode]);
+
+  const handleToggleBranchCollapse = useCallback(() => {
+    if (!clickedNode || !graphManagerRef.current) return;
+    pushHistory();
+    const collapsed = graphManagerRef.current.toggleBranchCollapse(clickedNode.id);
+    setError(
+      collapsed
+        ? `Collapsed the branch under "${clickedNode.title}".`
+        : `Expanded the branch under "${clickedNode.title}".`
+    );
+    refreshClickedNode();
+  }, [clickedNode, graphManagerRef, pushHistory, refreshClickedNode]);
+
+  const handleRelayoutTree = useCallback(() => {
+    if (!clickedNode || !graphManagerRef.current) return;
+    pushHistory();
+    graphManagerRef.current.resetTreeLayout(clickedNode.id);
+    setError(`Reflowed the tree around "${clickedNode.title}".`);
+    refreshClickedNode();
+  }, [clickedNode, graphManagerRef, pushHistory, refreshClickedNode]);
+
+  const handlePruneBranch = useCallback(() => {
+    if (!clickedNode) return;
+    pruneBranch(clickedNode.id, setError);
+    setActiveLinkContexts(new Set());
+    setSearchDockLinkId(null);
+    setSearchDockPosition(null);
+    dispatchPinned({ type: 'clear' });
+    refreshClickedNode();
+  }, [clickedNode, pruneBranch, refreshClickedNode]);
+
   const togglePathSelection = useCallback(async (node: GraphNode) => {
     const nextSelection = [...pathSelectedNodesRef.current];
     const existingIndex = nextSelection.findIndex(item => item.id === node.id);
@@ -445,6 +516,11 @@ const WikiWebExplorer = () => {
       },
     });
 
+    graphManagerRef.current.setLayoutMode(layoutMode);
+    graphManagerRef.current.setTreeSpacing(treeSpacing);
+    graphManagerRef.current.setBranchSpread(branchSpread);
+    graphManagerRef.current.setShowCrossLinks(showCrossLinks);
+
     updateQueueRef.current = new UpdateQueue(graphManagerRef.current, 500);
 
     const trackDock = () => {
@@ -484,8 +560,24 @@ const WikiWebExplorer = () => {
   }, []);
 
   useEffect(() => {
+    if (graphManagerRef.current) graphManagerRef.current.setLayoutMode(layoutMode);
+  }, [layoutMode]);
+
+  useEffect(() => {
     if (graphManagerRef.current) graphManagerRef.current.setNodeSpacing(nodeSpacing);
   }, [nodeSpacing]);
+
+  useEffect(() => {
+    if (graphManagerRef.current) graphManagerRef.current.setTreeSpacing(treeSpacing);
+  }, [treeSpacing]);
+
+  useEffect(() => {
+    if (graphManagerRef.current) graphManagerRef.current.setBranchSpread(branchSpread);
+  }, [branchSpread]);
+
+  useEffect(() => {
+    if (graphManagerRef.current) graphManagerRef.current.setShowCrossLinks(showCrossLinks);
+  }, [showCrossLinks]);
 
   useEffect(() => {
     if (graphManagerRef.current) graphManagerRef.current.setNodeSizeScale(nodeSizeScale);
@@ -504,6 +596,22 @@ const WikiWebExplorer = () => {
   useEffect(() => {
     localStorage.setItem('wikiIncludeBacklinks', includeBacklinks ? 'true' : 'false');
   }, [includeBacklinks]);
+
+  useEffect(() => {
+    localStorage.setItem('wikiLayoutMode', layoutMode);
+  }, [layoutMode]);
+
+  useEffect(() => {
+    localStorage.setItem('wikiTreeSpacing', String(treeSpacing));
+  }, [treeSpacing]);
+
+  useEffect(() => {
+    localStorage.setItem('wikiBranchSpread', String(branchSpread));
+  }, [branchSpread]);
+
+  useEffect(() => {
+    localStorage.setItem('wikiShowCrossLinks', showCrossLinks ? 'true' : 'false');
+  }, [showCrossLinks]);
 
   // Sync Metadata
   useEffect(() => {
@@ -725,6 +833,9 @@ const WikiWebExplorer = () => {
   const pinnedLinks = pinnedState.ids
     .map(id => graphManagerRef.current?.getLinkById(id))
     .filter((x): x is Link => Boolean(x));
+  const clickedNodeMeta = clickedNode
+    ? graphManagerRef.current?.getNodeMetadata(clickedNode.id)
+    : undefined;
   const mobileSearchDockMode = !isTouchDevice
     ? 'none'
     : searchProgress.isSearching && !searchTerminalMinimized
@@ -759,7 +870,7 @@ const WikiWebExplorer = () => {
   return (
     <div className="w-screen h-screen bg-gray-900 text-white relative overflow-hidden font-sans">
       <div className="absolute inset-0 z-0">
-        <LensingGridBackground graphManagerRef={graphManagerRef} />
+        <LensingGridBackground graphManagerRef={graphManagerRef} layoutMode={layoutMode} />
         <svg ref={svgRef} className="w-full h-full" />
       </div>
 
@@ -790,8 +901,16 @@ const WikiWebExplorer = () => {
       <GraphControls
         showSettings={showSettings}
         setShowSettings={setShowSettings}
+        layoutMode={layoutMode}
+        setLayoutMode={setLayoutMode}
         nodeSpacing={nodeSpacing}
         setNodeSpacing={setNodeSpacing}
+        treeSpacing={treeSpacing}
+        setTreeSpacing={setTreeSpacing}
+        branchSpread={branchSpread}
+        setBranchSpread={setBranchSpread}
+        showCrossLinks={showCrossLinks}
+        setShowCrossLinks={setShowCrossLinks}
         recursionDepth={recursionDepth}
         setRecursionDepth={setRecursionDepth}
         nodeSizeScale={nodeSizeScale}
@@ -841,6 +960,9 @@ const WikiWebExplorer = () => {
         clickedCategories={clickedNode ? nodeCategories[clickedNode.title] : undefined}
         clickedBacklinkCount={clickedNode ? nodeBacklinkCounts[clickedNode.title] : undefined}
         nodeThumbnails={nodeThumbnails}
+        layoutMode={layoutMode}
+        isPinned={Boolean(clickedNodeMeta?.isPinned)}
+        isBranchCollapsed={Boolean(clickedNodeMeta?.isCollapsed)}
         isPathSelected={Boolean(clickedNode && pathSelectedNodes.some(node => node.id === clickedNode.id))}
         pathSelectionCount={pathSelectedNodes.length}
         onClose={() => setClickedNode(null)}
@@ -849,6 +971,10 @@ const WikiWebExplorer = () => {
           if (!clickedNode) return Promise.resolve();
           return togglePathSelection(clickedNode);
         }}
+        onTogglePin={handleToggleNodePin}
+        onToggleBranchCollapse={handleToggleBranchCollapse}
+        onPruneBranch={handlePruneBranch}
+        onRelayoutTree={handleRelayoutTree}
         onDelete={handleDeleteNode}
       />
 

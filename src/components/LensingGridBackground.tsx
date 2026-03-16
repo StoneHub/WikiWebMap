@@ -1,5 +1,6 @@
 import { useEffect, useRef, type MutableRefObject } from 'react';
 import type { GraphManager } from '../GraphManager';
+import { type LayoutMode } from '../features/layout/layoutConfig';
 
 type LensingNode = { x: number; y: number; mass: number };
 
@@ -42,7 +43,10 @@ function displacePoint(x: number, y: number, masses: LensingNode[]) {
   return { x: x + dxTotal, y: y + dyTotal };
 }
 
-export function LensingGridBackground(props: { graphManagerRef: MutableRefObject<GraphManager | null> }) {
+export function LensingGridBackground(props: {
+  graphManagerRef: MutableRefObject<GraphManager | null>;
+  layoutMode: LayoutMode;
+}) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rafRef = useRef<number | null>(null);
 
@@ -64,17 +68,29 @@ export function LensingGridBackground(props: { graphManagerRef: MutableRefObject
     window.addEventListener('resize', onResize);
     resize();
 
+    let frameCount = 0;
     const draw = () => {
-      const intensity = Math.min(1.5, Math.max(0, EFFECT_INTENSITY));
+      frameCount++;
       const w = canvas.clientWidth;
       const h = canvas.clientHeight;
 
+      const rawMasses = props.graphManagerRef.current?.getLensingNodes() || [];
+      const isForest = props.layoutMode === 'forest';
+      const denseGraph = rawMasses.length > 120;
+      if ((isForest && frameCount % 2 === 1) || (denseGraph && frameCount % 3 !== 0)) {
+        rafRef.current = requestAnimationFrame(draw);
+        return;
+      }
+
       ctx.clearRect(0, 0, w, h);
 
-      const rawMasses = props.graphManagerRef.current?.getLensingNodes() || [];
+      const intensity = Math.min(
+        1.5,
+        Math.max(0, EFFECT_INTENSITY * (isForest ? 0.55 : 1) * (denseGraph ? 0.6 : 1))
+      );
       const masses = rawMasses
         .sort((a, b) => b.mass - a.mass)
-        .slice(0, Math.max(10, Math.round(20 + 40 * intensity)));
+        .slice(0, Math.max(8, Math.round(16 + 28 * intensity)));
 
       const gridSpacing = Math.max(40, Math.round(64 - 14 * intensity));
       const sampleStep = Math.max(10, Math.round(18 - 6 * intensity));
@@ -136,9 +152,10 @@ export function LensingGridBackground(props: { graphManagerRef: MutableRefObject
       window.removeEventListener('resize', onResize);
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
-  }, [props.graphManagerRef]);
+  }, [props.graphManagerRef, props.layoutMode]);
 
-  const opacity = Math.min(0.9, Math.max(0.2, 0.35 + EFFECT_INTENSITY * 0.55));
+  const modeOpacity = props.layoutMode === 'forest' ? 0.26 : 0.35;
+  const opacity = Math.min(0.9, Math.max(0.16, modeOpacity + EFFECT_INTENSITY * (props.layoutMode === 'forest' ? 0.26 : 0.55)));
   return (
     <canvas
       ref={canvasRef}

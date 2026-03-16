@@ -67,7 +67,13 @@ describe('useGraphState', () => {
       nodes: [{ id: 'Physics', title: 'Physics' }],
       links: [{ id: 'Physics-Mathematics', source: 'Physics', target: 'Mathematics', type: 'manual', context: 'Physics mentions Mathematics.' }],
       nodeMetadata: {
-        Physics: createMetadata({ isUserTyped: true }),
+        Physics: createMetadata({
+          isUserTyped: true,
+          treeId: 'Physics',
+          layoutDepth: 0,
+          isPinned: true,
+          manualPosition: { x: 120, y: 240 },
+        }),
       },
     };
 

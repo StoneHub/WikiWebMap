@@ -1,10 +1,19 @@
 import React, { useState } from 'react';
+import { type LayoutMode } from '../features/layout/layoutConfig';
 
 interface GraphControlsProps {
     showSettings: boolean;
     setShowSettings: (show: boolean) => void;
+    layoutMode: LayoutMode;
+    setLayoutMode: (mode: LayoutMode) => void;
     nodeSpacing: number;
     setNodeSpacing: (spacing: number) => void;
+    treeSpacing: number;
+    setTreeSpacing: (spacing: number) => void;
+    branchSpread: number;
+    setBranchSpread: (spread: number) => void;
+    showCrossLinks: boolean;
+    setShowCrossLinks: (value: boolean) => void;
     recursionDepth: number;
     setRecursionDepth: (depth: number) => void;
     nodeSizeScale: number;
@@ -27,8 +36,16 @@ interface GraphControlsProps {
 export const GraphControls: React.FC<GraphControlsProps> = ({
     showSettings,
     setShowSettings,
+    layoutMode,
+    setLayoutMode,
     nodeSpacing,
     setNodeSpacing,
+    treeSpacing,
+    setTreeSpacing,
+    branchSpread,
+    setBranchSpread,
+    showCrossLinks,
+    setShowCrossLinks,
     recursionDepth,
     setRecursionDepth,
     nodeSizeScale,
@@ -55,6 +72,18 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
         <>
             <div className="space-y-2 text-xs text-gray-200">
                 <div className="flex items-center justify-between">
+                    <span className="text-gray-300">Primary branches</span>
+                    <svg width="84" height="12" className="opacity-90">
+                        <line x1="2" y1="6" x2="82" y2="6" stroke="#7dd3fc" strokeWidth="4" strokeLinecap="round" />
+                    </svg>
+                </div>
+                <div className="flex items-center justify-between">
+                    <span className="text-gray-300">Cross-tree links</span>
+                    <svg width="84" height="12" className="opacity-90">
+                        <line x1="2" y1="6" x2="82" y2="6" stroke="#cbd5e1" strokeWidth="2" strokeDasharray="2 8" strokeLinecap="round" />
+                    </svg>
+                </div>
+                <div className="flex items-center justify-between">
                     <span className="text-gray-300">Outgoing links</span>
                     <svg width="84" height="12" className="opacity-90">
                         <line x1="2" y1="6" x2="82" y2="6" stroke="#a3a3a3" strokeWidth="3" />
@@ -80,7 +109,7 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                 </div>
             </div>
             <div className="mt-3 pt-3 border-t border-gray-700/50 text-[11px] text-gray-300 leading-relaxed">
-                Incoming links are other articles that link to this topic. Click or tap a node to spotlight its neighbors; click or tap empty space to clear.
+                Forest mode emphasizes first-discovered branches while keeping cross-links lighter. Click or tap a node to spotlight its neighbors; click or tap empty space to clear.
             </div>
         </>
     );
@@ -97,6 +126,37 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
             </div>
             <div className="space-y-4">
                 <div>
+                    <div className="flex justify-between text-xs text-gray-400 mb-2">
+                        <span>Layout Mode</span>
+                        <span className="uppercase tracking-[0.18em] text-[10px] text-cyan-200">{layoutMode}</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                        <button
+                            type="button"
+                            onClick={() => setLayoutMode('forest')}
+                            className={`rounded-xl border px-3 py-2 text-xs font-semibold transition ${layoutMode === 'forest'
+                                ? 'border-cyan-400/40 bg-cyan-400/12 text-cyan-100'
+                                : 'border-slate-700/70 bg-slate-900/50 text-slate-300 hover:border-cyan-400/20'
+                                }`}
+                        >
+                            Forest
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setLayoutMode('web')}
+                            className={`rounded-xl border px-3 py-2 text-xs font-semibold transition ${layoutMode === 'web'
+                                ? 'border-cyan-400/40 bg-cyan-400/12 text-cyan-100'
+                                : 'border-slate-700/70 bg-slate-900/50 text-slate-300 hover:border-cyan-400/20'
+                                }`}
+                        >
+                            Web
+                        </button>
+                    </div>
+                    <div className="mt-1 text-[10px] text-gray-500">
+                        Forest guides topics into branches. Web keeps the freer spider-map layout.
+                    </div>
+                </div>
+                <div>
                     <div className="flex justify-between text-xs text-gray-400 mb-1">
                         <span>Spacing</span>
                         <span>{nodeSpacing}px</span>
@@ -109,6 +169,40 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                         onChange={(e) => setNodeSpacing(Number(e.target.value))}
                         className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
                     />
+                </div>
+                <div>
+                    <div className="flex justify-between text-xs text-gray-400 mb-1">
+                        <span>Tree Spacing</span>
+                        <span>{treeSpacing}px</span>
+                    </div>
+                    <input
+                        type="range"
+                        min="120"
+                        max="280"
+                        value={treeSpacing}
+                        onChange={(e) => setTreeSpacing(Number(e.target.value))}
+                        className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                    />
+                    <div className="mt-1 text-[10px] text-gray-500">
+                        Controls the vertical growth distance between branch levels in forest mode.
+                    </div>
+                </div>
+                <div>
+                    <div className="flex justify-between text-xs text-gray-400 mb-1">
+                        <span>Branch Spread</span>
+                        <span>{branchSpread}px</span>
+                    </div>
+                    <input
+                        type="range"
+                        min="90"
+                        max="240"
+                        value={branchSpread}
+                        onChange={(e) => setBranchSpread(Number(e.target.value))}
+                        className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                    />
+                    <div className="mt-1 text-[10px] text-gray-500">
+                        Widens or tightens sibling branches in forest mode.
+                    </div>
                 </div>
                 <div>
                     <div className="flex justify-between text-xs text-gray-400 mb-1">
@@ -141,6 +235,22 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                         onChange={(e) => setNodeSizeScale(Number(e.target.value))}
                         className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
                     />
+                </div>
+                <div>
+                    <div className="flex justify-between text-xs text-gray-400 mb-1">
+                        <span>Link Visibility</span>
+                    </div>
+                    <label className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer select-none">
+                        <input
+                            type="checkbox"
+                            checked={showCrossLinks}
+                            onChange={(e) => setShowCrossLinks(e.target.checked)}
+                        />
+                        Show cross-tree links
+                    </label>
+                    <div className="mt-1 text-[10px] text-gray-500">
+                        Keeps secondary links between trees visible while forest branches stay readable.
+                    </div>
                 </div>
                 <div>
                     <div className="flex justify-between text-xs text-gray-400 mb-1">
@@ -323,7 +433,7 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                     <div className={`${mobileSheetClassName} panel-rise`}>
                         <div className="mb-3 flex items-center justify-between gap-3">
                             <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">
-                                Graph Physics
+                                Graph Layout
                             </h3>
                             <button
                                 onClick={() => setShowSettings(false)}
@@ -333,14 +443,14 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                             </button>
                         </div>
                         <div className="mb-3 text-[11px] text-slate-300 leading-relaxed">
-                            Tune how the map fans out and how many connections it explores when you expand a topic.
+                            Tune how the map organizes space, how trees fan out, and how many connections it explores when you expand a topic.
                         </div>
                         {renderSettingsContent()}
                     </div>
                 ) : (
                     <div className="fixed inset-x-3 bottom-36 sm:static bg-gray-800/90 backdrop-blur-md border border-gray-700/50 rounded-3xl sm:rounded-2xl p-4 shadow-2xl w-auto sm:w-64 max-w-[calc(100vw-2rem)] animate-fade-in-up pointer-events-auto max-h-[60vh] overflow-y-auto">
                         <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">
-                            Graph Physics
+                            Graph Layout
                         </h3>
                         {renderSettingsContent()}
                     </div>

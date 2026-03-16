@@ -1,5 +1,6 @@
 import React from 'react';
 import { Node as GraphNode } from '../GraphManager';
+import { type LayoutMode } from '../features/layout/layoutConfig';
 
 interface NodeDetailsPanelProps {
     clickedNode: GraphNode | null;
@@ -8,11 +9,18 @@ interface NodeDetailsPanelProps {
     clickedCategories?: string[];
     clickedBacklinkCount?: number;
     nodeThumbnails: Record<string, string>;
+    layoutMode: LayoutMode;
+    isPinned: boolean;
+    isBranchCollapsed: boolean;
     isPathSelected: boolean;
     pathSelectionCount: number;
     onClose: () => void;
     onExpand: (id: string) => void;
     onTogglePathSelection: () => Promise<void>;
+    onTogglePin: () => void;
+    onToggleBranchCollapse: () => void;
+    onPruneBranch: () => void;
+    onRelayoutTree: () => void;
     onDelete: (id: string) => void;
 }
 
@@ -23,11 +31,18 @@ export const NodeDetailsPanel: React.FC<NodeDetailsPanelProps> = ({
     clickedCategories,
     clickedBacklinkCount,
     nodeThumbnails,
+    layoutMode,
+    isPinned,
+    isBranchCollapsed,
     isPathSelected,
     pathSelectionCount,
     onClose,
     onExpand,
     onTogglePathSelection,
+    onTogglePin,
+    onToggleBranchCollapse,
+    onPruneBranch,
+    onRelayoutTree,
     onDelete,
 }) => {
     if (!clickedNode) return null;
@@ -95,6 +110,11 @@ export const NodeDetailsPanel: React.FC<NodeDetailsPanelProps> = ({
                                             {clickedDescription}
                                         </span>
                                     )}
+                                    {layoutMode === 'forest' && (
+                                        <span className="px-2.5 py-1 rounded-full bg-cyan-500/10 border border-cyan-400/20 text-cyan-100">
+                                            {isPinned ? 'Pinned' : 'Tree-guided'}
+                                        </span>
+                                    )}
                                     {typeof clickedBacklinkCount === 'number' && (
                                         <span className="px-2.5 py-1 rounded-full bg-orange-900/30 border border-orange-700/40 text-orange-200">
                                             Backlinks: {clickedBacklinkCount}
@@ -150,6 +170,25 @@ export const NodeDetailsPanel: React.FC<NodeDetailsPanelProps> = ({
                             >
                                 Expand
                             </button>
+                            {layoutMode === 'forest' && (
+                                <>
+                                    <button
+                                        onClick={onTogglePin}
+                                        className={`px-4 py-2.5 rounded-2xl text-xs font-medium transition border ${isPinned
+                                            ? 'bg-cyan-400/12 border-cyan-400/30 text-cyan-100'
+                                            : 'bg-slate-800/80 hover:bg-slate-700/80 text-slate-100 border-slate-700/70'
+                                            }`}
+                                    >
+                                        {isPinned ? 'Unpin Node' : 'Pin Node'}
+                                    </button>
+                                    <button
+                                        onClick={onToggleBranchCollapse}
+                                        className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-2xl text-xs font-medium transition text-white border border-slate-700/70"
+                                    >
+                                        {isBranchCollapsed ? 'Expand Branch' : 'Collapse Branch'}
+                                    </button>
+                                </>
+                            )}
                             <button
                                 onClick={() => void onTogglePathSelection()}
                                 className={`col-span-2 px-4 py-2.5 rounded-2xl text-xs font-medium transition border ${
@@ -163,6 +202,22 @@ export const NodeDetailsPanel: React.FC<NodeDetailsPanelProps> = ({
                                     ? `Selected For Path (${pathSelectionCount}/2)`
                                     : `Select For Path (${pathSelectionCount}/2)`}
                             </button>
+                            {layoutMode === 'forest' && (
+                                <>
+                                    <button
+                                        onClick={onRelayoutTree}
+                                        className="col-span-1 px-4 py-2.5 bg-emerald-500/10 hover:bg-emerald-500/18 text-emerald-200 rounded-2xl text-xs transition border border-emerald-500/20"
+                                    >
+                                        Relayout Tree
+                                    </button>
+                                    <button
+                                        onClick={onPruneBranch}
+                                        className="col-span-1 px-4 py-2.5 bg-amber-500/10 hover:bg-amber-500/18 text-amber-200 rounded-2xl text-xs transition border border-amber-500/20"
+                                    >
+                                        Prune Branch
+                                    </button>
+                                </>
+                            )}
                         </div>
                         <button
                             onClick={() => onDelete(clickedNode.id)}

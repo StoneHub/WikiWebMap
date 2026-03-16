@@ -158,6 +158,39 @@ export const useGraphState = () => {
         restoreSnapshot(next);
     };
 
+    const cleanupDeletedNodeIds = (ids: Iterable<string>) => {
+        const deletedIds = new Set(ids);
+        if (deletedIds.size === 0) return;
+
+        const removeFromSet = (prev: Set<string>) => {
+            const next = new Set(prev);
+            deletedIds.forEach(id => next.delete(id));
+            return next;
+        };
+        const removeFromMap = <T,>(prev: Record<string, T>) => {
+            const next = { ...prev };
+            deletedIds.forEach(id => delete next[id]);
+            return next;
+        };
+
+        setPathSelectedNodes(prev => prev.filter(node => !deletedIds.has(node.id)));
+        setBulkSelectedNodes(prev => prev.filter(node => !deletedIds.has(node.id)));
+        setUserTypedNodes(removeFromSet);
+        setAutoDiscoveredNodes(removeFromSet);
+        setExpandedNodes(removeFromSet);
+        setPathNodes(removeFromSet);
+        setRecentlyAddedNodes(removeFromSet);
+        setNodeThumbnails(removeFromMap);
+        setNodeDescriptions(removeFromMap);
+        setNodeCategories(removeFromMap);
+        setNodeBacklinkCounts(removeFromMap);
+
+        if (clickedNode && deletedIds.has(clickedNode.id)) {
+            setClickedNode(null);
+            setClickedSummary('');
+        }
+    };
+
     // --- Logic ---
 
     const addTopic = async (title: string, includeBacklinks: boolean, setLoading?: (v: boolean) => void, setError?: (v: string) => void) => {
@@ -198,6 +231,14 @@ export const useGraphState = () => {
             }
 
             setUserTypedNodes(prev => new Set([...prev, resolvedTitle]));
+            graphManagerRef.current?.setNodeMetadata(resolvedTitle, {
+                originSeed: resolvedTitle,
+                originDepth: 0,
+                colorRole: 'root',
+                treeId: resolvedTitle,
+                layoutDepth: 0,
+                primaryParentId: undefined,
+            });
             const existingNodeCount = graphManagerRef.current?.getNodeIds().length || 0;
             const isInitialSeed = existingNodeCount === 0;
             const visibleLinks = isInitialSeed ? links.slice(0, INITIAL_SEED_OUTGOING_LIMIT) : links;
@@ -217,7 +258,14 @@ export const useGraphState = () => {
                 title: resolvedTitle,
                 x: rootPosition.x,
                 y: rootPosition.y,
-                metadata: { originSeed: resolvedTitle, originDepth: 0, colorRole: 'root' }
+                metadata: {
+                    originSeed: resolvedTitle,
+                    originDepth: 0,
+                    colorRole: 'root',
+                    treeId: resolvedTitle,
+                    layoutDepth: 0,
+                    primaryParentId: undefined,
+                }
             }];
             const newLinks: Link[] = [];
             const newAutoDiscovered = new Set<string>();
@@ -230,7 +278,14 @@ export const useGraphState = () => {
                     title: linkObj.title,
                     x: position.x,
                     y: position.y,
-                    metadata: { originSeed: resolvedTitle, originDepth: 1, colorRole: 'child' }
+                    metadata: {
+                        originSeed: resolvedTitle,
+                        originDepth: 1,
+                        colorRole: 'child',
+                        treeId: resolvedTitle,
+                        layoutDepth: 1,
+                        primaryParentId: resolvedTitle,
+                    }
                 });
                 newAutoDiscovered.add(linkObj.title);
                 newLinks.push({
@@ -238,7 +293,8 @@ export const useGraphState = () => {
                     target: linkObj.title,
                     id: `${resolvedTitle}-${linkObj.title}`,
                     type: 'manual',
-                    context: linkObj.context
+                    context: linkObj.context,
+                    layoutRole: 'primary',
                 });
             });
 
@@ -251,7 +307,14 @@ export const useGraphState = () => {
                     title: blTitle,
                     x: position.x,
                     y: position.y,
-                    metadata: { originSeed: resolvedTitle, originDepth: 1, colorRole: 'child' }
+                    metadata: {
+                        originSeed: resolvedTitle,
+                        originDepth: 1,
+                        colorRole: 'child',
+                        treeId: resolvedTitle,
+                        layoutDepth: 1,
+                        primaryParentId: resolvedTitle,
+                    }
                 });
                 newAutoDiscovered.add(blTitle);
                 newLinks.push({
@@ -259,6 +322,7 @@ export const useGraphState = () => {
                     target: resolvedTitle,
                     id: `${blTitle}-${resolvedTitle}`,
                     type: 'backlink',
+                    layoutRole: 'primary',
                 });
             });
 
@@ -276,7 +340,8 @@ export const useGraphState = () => {
                         target: resolvedTitle,
                         id: `${existingNodeId}-${resolvedTitle}`,
                         type: 'auto',
-                        context: match.context
+                        context: match.context,
+                        layoutRole: 'cross',
                     });
                 }
             });
@@ -299,25 +364,7 @@ export const useGraphState = () => {
         if (graphManagerRef.current) {
             graphManagerRef.current.deleteNode(nodeId);
         }
-        const deleteFromSet = (prev: Set<string>) => { const s = new Set(prev); s.delete(nodeId); return s; };
-        const deleteFromMap = <T,>(prev: Record<string, T>) => {
-            const next = { ...prev };
-            delete next[nodeId];
-            return next;
-        };
-        setUserTypedNodes(deleteFromSet);
-        setAutoDiscoveredNodes(deleteFromSet);
-        setExpandedNodes(deleteFromSet);
-        setPathNodes(deleteFromSet);
-        setRecentlyAddedNodes(deleteFromSet);
-        setNodeThumbnails(deleteFromMap);
-        setNodeDescriptions(deleteFromMap);
-        setNodeCategories(deleteFromMap);
-        setNodeBacklinkCounts(deleteFromMap);
-
-        if (clickedNode?.id === nodeId) {
-            setClickedNode(null);
-        }
+        cleanupDeletedNodeIds([nodeId]);
     };
 
     const pruneGraph = (setError?: (msg: string) => void) => {
@@ -329,34 +376,9 @@ export const useGraphState = () => {
 
         if (!graphManagerRef.current) return;
         pushHistory();
-
-        ids.forEach(id => graphManagerRef.current!.deleteNode(id));
-        const deletedIds = new Set(ids);
+        graphManagerRef.current.deleteNodes(ids);
         setBulkSelectedNodes([]);
-        setPathSelectedNodes(prev => prev.filter(n => !deletedIds.has(n.id)));
-
-        const removeFromSet = (prev: Set<string>) => {
-            const s = new Set(prev);
-            ids.forEach(id => s.delete(id));
-            return s;
-        };
-        const removeFromMap = <T,>(prev: Record<string, T>) => {
-            const next = { ...prev };
-            ids.forEach(id => delete next[id]);
-            return next;
-        };
-
-        setPathNodes(removeFromSet);
-        setUserTypedNodes(removeFromSet);
-        setAutoDiscoveredNodes(removeFromSet);
-        setExpandedNodes(removeFromSet);
-        setRecentlyAddedNodes(removeFromSet);
-        setNodeThumbnails(removeFromMap);
-        setNodeDescriptions(removeFromMap);
-        setNodeCategories(removeFromMap);
-        setNodeBacklinkCounts(removeFromMap);
-
-        if (clickedNode && deletedIds.has(clickedNode.id)) setClickedNode(null);
+        cleanupDeletedNodeIds(ids);
 
         // Callbacks for extra cleanup if needed
         if (setError) setError(`Deleted ${ids.length} selected nodes.`);
@@ -371,34 +393,7 @@ export const useGraphState = () => {
         const deletedCount = graphManagerRef.current.pruneNodes();
 
         if (deletedCount > 0) {
-            const deletedIds = new Set(idsToDelete);
-            const removeFromSet = (prev: Set<string>) => {
-                const next = new Set(prev);
-                idsToDelete.forEach(id => next.delete(id));
-                return next;
-            };
-            const removeFromMap = <T,>(prev: Record<string, T>) => {
-                const next = { ...prev };
-                idsToDelete.forEach(id => delete next[id]);
-                return next;
-            };
-
-            setPathSelectedNodes(prev => prev.filter(node => !deletedIds.has(node.id)));
-            setBulkSelectedNodes(prev => prev.filter(node => !deletedIds.has(node.id)));
-            setUserTypedNodes(removeFromSet);
-            setAutoDiscoveredNodes(removeFromSet);
-            setExpandedNodes(removeFromSet);
-            setPathNodes(removeFromSet);
-            setRecentlyAddedNodes(removeFromSet);
-            setNodeThumbnails(removeFromMap);
-            setNodeDescriptions(removeFromMap);
-            setNodeCategories(removeFromMap);
-            setNodeBacklinkCounts(removeFromMap);
-
-            if (clickedNode && deletedIds.has(clickedNode.id)) {
-                setClickedNode(null);
-                setClickedSummary('');
-            }
+            cleanupDeletedNodeIds(idsToDelete);
         }
 
         if (deletedCount > 0) {
@@ -430,7 +425,9 @@ export const useGraphState = () => {
             const gm = graphManagerRef.current;
             const originMeta = gm?.getNodeMetadata(title);
             const originSeed = originMeta?.originSeed || title;
+            const treeId = originMeta?.treeId || originSeed;
             const originDepthBase = originMeta?.originDepth ?? 0;
+            const layoutDepthBase = originMeta?.layoutDepth ?? originDepthBase;
             const existingGraphNodeIds = new Set(gm?.getNodeIds() || []);
             const originPosition = gm?.getNodePosition(title) || gm?.getViewportCenter() || { x: 0, y: 0 };
 
@@ -505,15 +502,25 @@ export const useGraphState = () => {
 
             sortedCandidates.forEach(c => {
                 const candidateTitle = c.title;
+                const alreadyInGraph = existingGraphNodeIds.has(candidateTitle);
                 const position = getRadialSpawnPosition(originPosition, nodesToAdd.length, sortedCandidates.length, 145);
-                nodesToAdd.push({
-                    id: candidateTitle,
-                    title: candidateTitle,
-                    x: position.x,
-                    y: position.y,
-                    metadata: { originSeed, originDepth: originDepthBase + 1, colorRole: 'child' }
-                });
-                newAutoDiscovered.add(candidateTitle);
+                if (!alreadyInGraph) {
+                    nodesToAdd.push({
+                        id: candidateTitle,
+                        title: candidateTitle,
+                        x: position.x,
+                        y: position.y,
+                        metadata: {
+                            originSeed,
+                            originDepth: originDepthBase + 1,
+                            colorRole: 'child',
+                            treeId,
+                            layoutDepth: layoutDepthBase + 1,
+                            primaryParentId: title,
+                        }
+                    });
+                    newAutoDiscovered.add(candidateTitle);
+                }
 
                 if (c.direction === 'out') {
                     linksToAdd.push({
@@ -521,7 +528,8 @@ export const useGraphState = () => {
                         target: candidateTitle,
                         id: `${title}-${candidateTitle}`,
                         type: c.isBidirectional ? 'expand_backlink' : 'expand',
-                        context: c.context
+                        context: c.context,
+                        layoutRole: alreadyInGraph ? 'cross' : 'primary',
                     });
                 } else {
                     linksToAdd.push({
@@ -529,6 +537,7 @@ export const useGraphState = () => {
                         target: title,
                         id: `${candidateTitle}-${title}`,
                         type: 'expand_backlink',
+                        layoutRole: alreadyInGraph ? 'cross' : 'primary',
                     });
                 }
 
@@ -541,7 +550,8 @@ export const useGraphState = () => {
                         target: candidateTitle,
                         id: `${existing}-${candidateTitle}`,
                         type: 'auto',
-                        context: match.context
+                        context: match.context,
+                        layoutRole: 'cross',
                     });
                 });
             });
@@ -559,6 +569,20 @@ export const useGraphState = () => {
         } finally {
             if (setLoading) setLoading(false);
         }
+    };
+
+    const pruneBranch = (nodeId: string, setError?: (msg: string) => void) => {
+        if (!graphManagerRef.current) return;
+        const branchIds = graphManagerRef.current.getBranchNodeIds(nodeId);
+        if (branchIds.length === 0) {
+            if (setError) setError('No branch nodes found to prune.');
+            return;
+        }
+
+        pushHistory();
+        graphManagerRef.current.deleteNodes(branchIds);
+        cleanupDeletedNodeIds(branchIds);
+        if (setError) setError(`Pruned ${branchIds.length} nodes from the branch.`);
     };
 
     return {
@@ -591,6 +615,7 @@ export const useGraphState = () => {
         deleteNodeImperative,
         pruneGraph,
         pruneLeafNodes,
+        pruneBranch,
         undo,
         redo,
         pushHistory,
