@@ -1,0 +1,82 @@
+- generic [ref=e3]:
+  - img [ref=e5]
+  - generic [ref=e8]:
+    - generic [ref=e11]:
+      - heading "WikiWebMap" [level=1] [ref=e12]
+      - paragraph [ref=e13]: Trace how Wikipedia topics connect. Start with one idea, or jump into a curated path and watch the graph bridge the gap.
+    - generic [ref=e14]:
+      - generic [ref=e15]: Search a Wikipedia topic
+      - generic [ref=e16]:
+        - generic [ref=e17]: Explore A Topic
+        - generic [ref=e18]: Press Enter to add it
+      - textbox "Search a Wikipedia topic" [ref=e19]:
+        - /placeholder: Search a Wikipedia topic...
+    - generic [ref=e20]:
+      - generic [ref=e21]:
+        - generic [ref=e22]: Start Here
+        - paragraph [ref=e23]: Search one topic to seed the map, then click nodes to inspect them or pick two ideas to trace a path.
+      - generic [ref=e24]:
+        - generic [ref=e25]: Quick Topics
+        - generic [ref=e26]:
+          - button "Physics" [ref=e27] [cursor=pointer]
+          - button "Jazz" [ref=e28] [cursor=pointer]
+          - button "Mount Everest" [ref=e29] [cursor=pointer]
+    - generic [ref=e30]:
+      - generic [ref=e31]:
+        - generic [ref=e32]:
+          - generic [ref=e33]: Curated Path Ideas
+          - generic [ref=e34]: Use these when you want the app to show you an interesting bridge instead of starting from one page.
+        - button "Shuffle" [ref=e35] [cursor=pointer]
+      - generic [ref=e36]:
+        - button "place Run path Great Barrier Reef→Coral Explore a place through nearby topics and landmarks." [ref=e37] [cursor=pointer]:
+          - generic [ref=e38]:
+            - generic [ref=e39]: place
+            - generic [ref=e40]: Run path
+          - generic [ref=e41]: Great Barrier Reef→Coral
+          - generic [ref=e42]: Explore a place through nearby topics and landmarks.
+        - button "technology Run path OpenAI→Transformer (machine learning model) See how technical ideas and tools connect." [ref=e43] [cursor=pointer]:
+          - generic [ref=e44]:
+            - generic [ref=e45]: technology
+            - generic [ref=e46]: Run path
+          - generic [ref=e47]: OpenAI→Transformer (machine learning model)
+          - generic [ref=e48]: See how technical ideas and tools connect.
+        - button "technology Run path Minecraft→Procedural generation See how technical ideas and tools connect." [ref=e49] [cursor=pointer]:
+          - generic [ref=e50]:
+            - generic [ref=e51]: technology
+            - generic [ref=e52]: Run path
+          - generic [ref=e53]: Minecraft→Procedural generation
+          - generic [ref=e54]: See how technical ideas and tools connect.
+    - button "Start Exploration" [disabled] [ref=e55]
+    - generic [ref=e56]: "Tip: after the graph appears, click a topic to inspect it. To find a bridge between two topics, use Shift+Click on desktop or Select For Path in the mobile details sheet."
+  - generic:
+    - generic [ref=e57]:
+      - button "Settings" [ref=e58] [cursor=pointer]:
+        - img [ref=e59]
+      - button "Legend" [ref=e61] [cursor=pointer]:
+        - img [ref=e62]
+    - generic [ref=e64]:
+      - button "✂️ Prune" [disabled] [ref=e65]:
+        - generic [ref=e66]: ✂️
+        - generic [ref=e67]: Prune
+      - button "🗑️ Delete Selection" [disabled] [ref=e68]:
+        - generic [ref=e69]: 🗑️
+        - generic [ref=e70]: Delete Selection
+  - generic [ref=e71]:
+    - generic [ref=e72]:
+      - generic [ref=e73]:
+        - text: "Nodes:"
+        - strong [ref=e74]: "0"
+      - generic [ref=e75]:
+        - text: "Connections:"
+        - strong [ref=e76]: "0"
+      - generic [ref=e77]:
+        - text: "Path:"
+        - strong [ref=e78]: Shift+Click
+      - generic [ref=e79]:
+        - text: "Select:"
+        - strong [ref=e80]: Alt+Drag
+      - button "View Session Diagnostics" [ref=e81] [cursor=pointer]:
+        - img [ref=e82]
+    - generic [ref=e84]: Start with one topic to seed the graph, or use a curated path card to watch WikiWebMap search for a bridge between two ideas.
+  - generic:
+    - generic: Hover a connection line for context. Click a line to pin it.

@@ -3,6 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { GraphManager, GraphStateSnapshot, NodeMetadata } from '../GraphManager';
 import type { UpdateQueue } from '../UpdateQueue';
+import { WikiService } from '../WikiService';
 import { useGraphState } from './useGraphState';
 
 function createMetadata(overrides: Partial<NodeMetadata> = {}): NodeMetadata {
@@ -66,7 +67,13 @@ describe('useGraphState', () => {
       nodes: [{ id: 'Physics', title: 'Physics' }],
       links: [{ id: 'Physics-Mathematics', source: 'Physics', target: 'Mathematics', type: 'manual', context: 'Physics mentions Mathematics.' }],
       nodeMetadata: {
-        Physics: createMetadata({ isUserTyped: true }),
+        Physics: createMetadata({
+          isUserTyped: true,
+          treeId: 'Physics',
+          layoutDepth: 0,
+          isPinned: true,
+          manualPosition: { x: 120, y: 240 },
+        }),
       },
     };
 
@@ -138,6 +145,63 @@ describe('useGraphState', () => {
     expect(restoredState.nodeBacklinkCounts).toEqual({ Physics: 12 });
     expect(restoredState.clickedNode).toBeNull();
     expect(restoredState.clickedSummary).toBe('');
+
+    rendered.unmount();
+  });
+
+  it('limits the initial seed burst to a calmer set of leaves', async () => {
+    const rendered = renderUseGraphStateHook();
+    const current = rendered.getCurrent();
+
+    const graphManagerFns = {
+      getNodeIds: vi.fn(() => []),
+      getViewportCenter: vi.fn(() => ({ x: 0, y: 0 })),
+      setNodeMetadata: vi.fn(),
+      getStateSnapshot: vi.fn(() => ({
+        nodes: [],
+        links: [],
+        nodeMetadata: {},
+      })),
+    };
+
+    const queueUpdate = vi.fn();
+    const updateQueueFns = {
+      queueUpdate,
+    };
+
+    vi.spyOn(WikiService, 'resolveTitle').mockResolvedValue('Physics');
+    vi.spyOn(WikiService, 'fetchLinks').mockResolvedValue(
+      Array.from({ length: 20 }, (_, index) => ({
+        title: `Outlink ${index + 1}`,
+        context: `Context ${index + 1}`,
+      }))
+    );
+    vi.spyOn(WikiService, 'fetchSummary').mockResolvedValue({
+      title: 'Physics',
+      extract: 'Physics summary',
+      summary: 'Physics summary',
+      description: 'Scientific field',
+    });
+    vi.spyOn(WikiService, 'fetchCategories').mockResolvedValue(['Science']);
+    vi.spyOn(WikiService, 'fetchBacklinks').mockResolvedValue(
+      Array.from({ length: 10 }, (_, index) => `Backlink ${index + 1}`)
+    );
+    vi.spyOn(WikiService, 'getCachedNodes').mockReturnValue([]);
+
+    act(() => {
+      current.graphManagerRef.current = graphManagerFns as unknown as GraphManager;
+      current.updateQueueRef.current = updateQueueFns as unknown as UpdateQueue;
+    });
+
+    await act(async () => {
+      await rendered.getCurrent().addTopic('Physics', true);
+    });
+
+    expect(queueUpdate).toHaveBeenCalledTimes(1);
+    const [queuedNodes, queuedLinks] = queueUpdate.mock.calls[0] as [Array<{ id: string }>, Array<{ id: string }>];
+    expect(queuedNodes).toHaveLength(13);
+    expect(queuedLinks).toHaveLength(12);
+    expect(queuedNodes[0]?.id).toBe('Physics');
 
     rendered.unmount();
   });
