@@ -16,7 +16,7 @@ import LogPanel from './components/LogPanel';
 import { connectionLogger } from './ConnectionLogger';
 import { RecaptchaService } from './services/RecaptchaService';
 import { clientErrorReporter } from './services/ClientErrorReporter';
-import { useGraphState, type AppSnapshot } from './hooks/useGraphState';
+import { useGraphState } from './hooks/useGraphState';
 import { runtimeConfig } from './config/runtimeConfig';
 import {
   DEFAULT_BRANCH_SPREAD,
@@ -80,9 +80,6 @@ const WikiWebExplorer = () => {
     undo,
     redo,
     pushHistory,
-    captureSnapshot,
-    resetGraphState,
-    restoreSnapshot,
   } = useGraphState();
 
   // --- Search & UI State ---
@@ -187,8 +184,6 @@ const WikiWebExplorer = () => {
   const animationFrameRef = useRef<number>();
   const searchDockLinkIdRef = useRef<string | null>(null);
   const searchDebounceTimeoutRef = useRef<number | null>(null);
-  const searchSnapshotRef = useRef<AppSnapshot | null>(null);
-  const restoreSearchSnapshotRef = useRef(false);
   const refreshClickedNode = useCallback(() => {
     setClickedNode(prev => (prev ? { ...prev } : prev));
   }, [setClickedNode]);
@@ -674,33 +669,20 @@ const WikiWebExplorer = () => {
     graphManagerRef.current?.setPathHighlight(pathNodes.size > 0 ? pathNodes : null);
   }, [pathNodes]);
 
-  const resetSearchUi = useCallback(() => {
-    setSearchDockLinkId(null);
-    setSearchDockPosition(null);
-    setFoundPaths([]);
-    setSearchLog([]);
-    setSearchProgress(prev => ({ ...createDefaultSearchProgress(), keepSearching: prev.keepSearching }));
-    dispatchPinned({ type: 'clear' });
-  }, []);
-
-  const restoreSearchSnapshot = useCallback((message: string) => {
-    if (searchSnapshotRef.current) {
-      restoreSnapshot(searchSnapshotRef.current);
-    } else {
-      resetGraphState();
-    }
-    resetSearchUi();
-    setSearchTerm('');
-    setError(message);
-  }, [resetGraphState, resetSearchUi, restoreSnapshot]);
-
   // Search Logic (kept in App for now, but uses hook wrapper)
   const cancelSearch = () => {
     searchAbortRef.current = true;
     searchPauseRef.current = false;
-    restoreSearchSnapshotRef.current = true;
-    setError('Cancelling search and restoring the previous graph...');
-    setSearchLog(prev => [...prev, `[USER] Abort command received.`].slice(-8));
+    searchQueueRef.current = [];
+    setSearchQueue([]);
+    setSearchDockLinkId(null);
+    setSearchDockPosition(null);
+    setSearchProgress(prev => ({ ...prev, isPaused: false, queueSize: 0 }));
+    setError('Stopping search. Keeping the current map and topics in place.');
+    setSearchLog(prev => [
+      ...prev,
+      '[USER] Stop command received. Preserving the current map and clearing queued searches.',
+    ].slice(-8));
   };
 
   const pauseSearch = () => {
@@ -774,8 +756,6 @@ const WikiWebExplorer = () => {
     setSearchTerminalMinimized(false);
     searchAbortRef.current = false;
     searchPauseRef.current = false;
-    restoreSearchSnapshotRef.current = false;
-    searchSnapshotRef.current = captureSnapshot();
     setFoundPaths([]);
     setSearchDockLinkId(null);
     setSearchDockPosition(null);
@@ -784,11 +764,10 @@ const WikiWebExplorer = () => {
     try {
       if (job.source === 'suggested') {
         pushHistory();
-        resetGraphState();
         setShowFeaturedPaths(false);
         setShowSuggestions(false);
         setSearchTerm(`${job.from} → ${job.to}`);
-        setSearchLog([`[QUEUE] Seeding "${job.from}" and "${job.to}"...`]);
+        setSearchLog([`[QUEUE] Exploring a bridge between "${job.from}" and "${job.to}" on the current map...`]);
         setSearchProgress(prev => ({ ...prev, isSearching: true, isPaused: false }));
       } else {
         setSearchLog([`[QUEUE] Searching path: ${job.from} → ${job.to}`]);
@@ -800,7 +779,6 @@ const WikiWebExplorer = () => {
         addTopic(job.to, true, undefined, undefined)
       ]);
       if (searchAbortRef.current) {
-        restoreSearchSnapshotRef.current = true;
         return;
       }
       setSearchLog(prev => [...prev, `[QUEUE] Launching pathfinder...`].slice(-8));
@@ -808,26 +786,24 @@ const WikiWebExplorer = () => {
         pushHistory();
       }
       const result = await findPath(startTitle || job.from, endTitle || job.to);
-      if (result.status !== 'completed') {
-        restoreSearchSnapshotRef.current = true;
+      if (result.status === 'aborted') {
+        setError('Search stopped. Kept the topics already visible on the map.');
+      } else if (result.status === 'not_found') {
+        setError('No complete path found yet. The explored topics stayed on the map so you can keep exploring from here.');
       }
     } catch (err: any) {
       clientErrorReporter.reportError(err, 'Queued path search failed');
-      restoreSearchSnapshotRef.current = true;
       setError(err?.message || 'Error during queued search');
     } finally {
-      if (restoreSearchSnapshotRef.current) {
-        const restoreMessage = searchAbortRef.current
-          ? 'Search cancelled. Restored the previous graph.'
-          : 'Search ended without a complete path. Restored the previous graph.';
-        restoreSearchSnapshot(restoreMessage);
-      } else {
-        setSearchProgress(prev => ({ ...prev, isSearching: false, isPaused: false }));
-      }
+      setSearchProgress(prev => ({
+        ...prev,
+        isSearching: false,
+        isPaused: false,
+        queueSize: searchQueueRef.current.length,
+      }));
       isRunningSearchRef.current = false;
       setActiveSearch(null);
-      searchSnapshotRef.current = null;
-      if (searchQueueRef.current.length > 0) {
+      if (!searchAbortRef.current && searchQueueRef.current.length > 0) {
         const next = searchQueueRef.current[0];
         searchQueueRef.current = searchQueueRef.current.slice(1);
         setSearchQueue(searchQueueRef.current);

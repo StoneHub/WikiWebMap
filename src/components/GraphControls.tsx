@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { type LayoutMode } from '../features/layout/layoutConfig';
 
 interface GraphControlsProps {
@@ -65,9 +65,56 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
     onOpenLogs,
 }) => {
     const [showLegend, setShowLegend] = useState(false);
+    const [desktopPanelSidecarLeft, setDesktopPanelSidecarLeft] = useState<number | null>(null);
     const isGuidedMap = layoutMode === 'structured';
     const mobileSheetClassName =
         'fixed inset-x-3 bottom-20 pointer-events-auto rounded-[1.75rem] border border-slate-700/70 bg-slate-900/94 p-4 shadow-[0_22px_60px_rgba(2,6,23,0.6)] backdrop-blur-xl max-h-[60vh] overflow-y-auto';
+    const desktopPanelClassName =
+        'pointer-events-auto w-80 max-w-[calc(100vw-3rem)] overflow-y-auto rounded-2xl border border-gray-700/60 bg-gray-800/92 p-4 shadow-2xl backdrop-blur-md';
+    const desktopPanelStyle = {
+        maxHeight: 'clamp(18rem, calc(100vh - 24rem), 30rem)',
+    } as const;
+    const desktopSidecarPanelStyle = {
+        maxHeight: 'calc(100vh - 3rem)',
+    } as const;
+
+    const toggleSettings = () => {
+        const next = !showSettings;
+        setShowSettings(next);
+        if (next) setShowLegend(false);
+    };
+
+    const toggleLegend = () => {
+        const next = !showLegend;
+        setShowLegend(next);
+        if (next) setShowSettings(false);
+    };
+
+    useEffect(() => {
+        if (isTouchDevice || (!showLegend && !showSettings) || typeof window === 'undefined') {
+            setDesktopPanelSidecarLeft(null);
+            return;
+        }
+
+        const updateDesktopPanelPosition = () => {
+            const searchPanel = document.querySelector('div.fixed.top-3.left-3.right-3');
+            const panelWidth = 320;
+            const viewportPadding = 24;
+            const gap = 24;
+            const searchRect = searchPanel?.getBoundingClientRect();
+
+            if (searchRect && searchRect.right + gap + panelWidth <= window.innerWidth - viewportPadding) {
+                setDesktopPanelSidecarLeft(searchRect.right + gap);
+                return;
+            }
+
+            setDesktopPanelSidecarLeft(null);
+        };
+
+        updateDesktopPanelPosition();
+        window.addEventListener('resize', updateDesktopPanelPosition);
+        return () => window.removeEventListener('resize', updateDesktopPanelPosition);
+    }, [isTouchDevice, showLegend, showSettings]);
 
     const renderLegendContent = () => (
         <>
@@ -110,7 +157,7 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                 </div>
             </div>
             <div className="mt-3 pt-3 border-t border-gray-700/50 text-[11px] text-gray-300 leading-relaxed">
-                Guided mode keeps the draggable node map, but adds stronger branch anchors and quieter bridge links so the graph stays readable while you rearrange it.
+                Guided mode keeps the draggable node map, but adds stronger branch anchors and quieter bridge links so the graph stays readable while you rearrange it. Wider, brighter links hint at tighter local overlap between topics.
             </div>
         </>
     );
@@ -325,12 +372,57 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
             : 'bottom-3';
 
     return (
-        <div className={isTouchDevice ? `fixed right-3 ${mobileDockOffsetClassName} z-20 flex flex-col-reverse items-end gap-3 pointer-events-none` : 'fixed bottom-20 left-3 sm:bottom-8 sm:left-6 z-20 flex flex-col items-start gap-2 sm:gap-3 pointer-events-none'}>
-            <div className={isTouchDevice ? 'pointer-events-auto flex flex-col gap-2 items-end' : 'pointer-events-auto flex gap-2'}>
+        <div className={isTouchDevice ? `fixed right-3 ${mobileDockOffsetClassName} z-20 flex flex-col-reverse items-end gap-3 pointer-events-none` : 'fixed bottom-8 left-6 z-20 pointer-events-none'}>
+            {!isTouchDevice && (showLegend || showSettings) && (
+                <div
+                    className={desktopPanelSidecarLeft !== null
+                        ? 'pointer-events-none fixed top-6 z-20 flex flex-col gap-3'
+                        : 'pointer-events-none absolute left-0 bottom-full mb-3 flex flex-col gap-3'}
+                    style={desktopPanelSidecarLeft !== null ? { left: desktopPanelSidecarLeft } : undefined}
+                >
+                    {showLegend && (
+                        <div className={desktopPanelClassName} style={desktopPanelSidecarLeft !== null ? desktopSidecarPanelStyle : desktopPanelStyle}>
+                            <div className="mb-3 flex items-center justify-between gap-3">
+                                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">
+                                    Legend
+                                </h3>
+                                <button
+                                    onClick={() => setShowLegend(false)}
+                                    className="rounded-full border border-gray-700/70 bg-gray-900/70 px-3 py-1 text-[11px] text-gray-300"
+                                >
+                                    Close
+                                </button>
+                            </div>
+                            {renderLegendContent()}
+                        </div>
+                    )}
+                    {showSettings && (
+                        <div className={desktopPanelClassName} style={desktopPanelSidecarLeft !== null ? desktopSidecarPanelStyle : desktopPanelStyle}>
+                            <div className="mb-3 flex items-center justify-between gap-3">
+                                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">
+                                    Graph Layout
+                                </h3>
+                                <button
+                                    onClick={() => setShowSettings(false)}
+                                    className="rounded-full border border-gray-700/70 bg-gray-900/70 px-3 py-1 text-[11px] text-gray-300"
+                                >
+                                    Close
+                                </button>
+                            </div>
+                            <div className="mb-3 text-[11px] text-slate-300 leading-relaxed">
+                                Tune how the map organizes space, how trees fan out, and how many connections it explores when you expand a topic.
+                            </div>
+                            {renderSettingsContent()}
+                        </div>
+                    )}
+                </div>
+            )}
+
+            <div className={isTouchDevice ? 'pointer-events-auto flex flex-col gap-2 items-end' : 'pointer-events-auto mb-3 flex gap-2'}>
                 {isTouchDevice ? (
                     <>
                         <button
-                            onClick={() => setShowSettings(!showSettings)}
+                            onClick={toggleSettings}
                             className="w-12 h-12 bg-slate-800/85 border border-slate-600/50 rounded-full shadow-xl flex items-center justify-center hover:bg-slate-700 text-slate-300 transition-all"
                             title="Settings"
                         >
@@ -345,7 +437,7 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                         </button>
 
                         <button
-                            onClick={() => setShowLegend(v => !v)}
+                            onClick={toggleLegend}
                             className="w-12 h-12 bg-slate-800/85 border border-slate-600/50 rounded-full shadow-xl flex items-center justify-center hover:bg-slate-700 text-slate-300 transition-all"
                             title="Legend"
                             aria-label="Legend"
@@ -386,9 +478,10 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                 ) : (
                     <>
                         <button
-                            onClick={() => setShowSettings(!showSettings)}
+                            onClick={toggleSettings}
                             className="w-12 h-12 bg-gray-800/80 backdrop-blur-md border border-gray-600/50 rounded-full shadow-xl flex items-center justify-center hover:bg-gray-700 text-gray-300 transition-all hover:scale-105"
                             title="Settings"
+                            aria-expanded={showSettings}
                         >
                             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path
@@ -401,10 +494,11 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                         </button>
 
                         <button
-                            onClick={() => setShowLegend(v => !v)}
+                            onClick={toggleLegend}
                             className="w-12 h-12 bg-gray-800/80 backdrop-blur-md border border-gray-600/50 rounded-full shadow-xl flex items-center justify-center hover:bg-gray-700 text-gray-300 transition-all hover:scale-105"
                             title="Legend"
                             aria-label="Legend"
+                            aria-expanded={showLegend}
                         >
                             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path
@@ -419,8 +513,7 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                 )}
             </div>
 
-            {showLegend && (
-                isTouchDevice ? (
+            {showLegend && isTouchDevice && (
                     <div className={`${mobileSheetClassName} panel-rise`}>
                         <div className="mb-3 flex items-center justify-between gap-3">
                             <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">
@@ -438,18 +531,9 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                         </p>
                         {renderLegendContent()}
                     </div>
-                ) : (
-                    <div className="fixed inset-x-3 bottom-36 sm:static bg-gray-800/90 backdrop-blur-md border border-gray-700/50 rounded-3xl sm:rounded-2xl p-4 shadow-2xl w-auto sm:w-64 max-w-[calc(100vw-2rem)] animate-fade-in-up pointer-events-auto max-h-[50vh] overflow-y-auto">
-                        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">
-                            Legend
-                        </h3>
-                        {renderLegendContent()}
-                    </div>
-                )
             )}
 
-            {showSettings && (
-                isTouchDevice ? (
+            {showSettings && isTouchDevice && (
                     <div className={`${mobileSheetClassName} panel-rise`}>
                         <div className="mb-3 flex items-center justify-between gap-3">
                             <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">
@@ -467,14 +551,6 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                         </div>
                         {renderSettingsContent()}
                     </div>
-                ) : (
-                    <div className="fixed inset-x-3 bottom-36 sm:static bg-gray-800/90 backdrop-blur-md border border-gray-700/50 rounded-3xl sm:rounded-2xl p-4 shadow-2xl w-auto sm:w-64 max-w-[calc(100vw-2rem)] animate-fade-in-up pointer-events-auto max-h-[60vh] overflow-y-auto">
-                        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">
-                            Graph Layout
-                        </h3>
-                        {renderSettingsContent()}
-                    </div>
-                )
             )}
 
             {!isTouchDevice && (

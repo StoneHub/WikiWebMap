@@ -165,9 +165,9 @@ export async function runPathfinder(args: {
     }
 
     if (foundDepth === null) {
-      args.setError('No path found. Try a related topic or increase depth, then search again.');
+      args.setError('No path found yet. The explored topics stayed on the map, so try a related idea or increase depth and continue from here.');
       args.setSearchLog(prev =>
-        [...prev, `[FAILURE] Target not found. Try related topics or increase depth.`].slice(-8)
+        [...prev, '[FAILURE] Target not found. Preserving explored topics on the map.'].slice(-8)
       );
       return { status: 'not_found', foundPathCount: 0 };
     }

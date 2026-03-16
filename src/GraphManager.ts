@@ -109,6 +109,13 @@ export interface NodeMetadata {
   isCollapsed?: boolean;
 }
 
+type LinkInsight = {
+  sharedNeighbors: number;
+  sharedNeighborRatio: number;
+  isReciprocal: boolean;
+  strength: number;
+};
+
 /**
  * GraphManager - Imperative D3 graph management
  * Owns the simulation and DOM, provides methods for incremental updates
@@ -133,6 +140,7 @@ export class GraphManager {
   private focusNeighborIds: Set<string> = new Set();
   private degreeById: Map<string, number> = new Map();
   private neighborIdsById: Map<string, Set<string>> = new Map();
+  private linkInsightsById: Map<string, LinkInsight> = new Map();
   private childrenByParent: Map<string, string[]> = new Map();
   private hiddenNodeIds: Set<string> = new Set();
   private forestTargets: Map<string, { x: number; y: number }> = new Map();
@@ -293,6 +301,8 @@ export class GraphManager {
   private rebuildGraphCaches() {
     this.degreeById = new Map();
     this.neighborIdsById = new Map();
+    this.linkInsightsById = new Map();
+    const directedPairs = new Set<string>();
 
     for (const node of this.nodes) {
       this.degreeById.set(node.id, 0);
@@ -309,7 +319,56 @@ export class GraphManager {
       if (!this.neighborIdsById.has(targetId)) this.neighborIdsById.set(targetId, new Set());
       this.neighborIdsById.get(sourceId)!.add(targetId);
       this.neighborIdsById.get(targetId)!.add(sourceId);
+      directedPairs.add(`${sourceId}→${targetId}`);
     }
+
+    for (const link of this.links) {
+      const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
+      const targetId = typeof link.target === 'object' ? link.target.id : link.target;
+      const sourceDegree = this.degreeById.get(sourceId) || 0;
+      const targetDegree = this.degreeById.get(targetId) || 0;
+      const sharedNeighbors = this.countSharedNeighbors(sourceId, targetId);
+      const sharedNeighborRatio = Math.min(
+        1,
+        sharedNeighbors / Math.max(1, Math.min(Math.max(1, sourceDegree - 1), Math.max(1, targetDegree - 1)))
+      );
+      const isReciprocal = directedPairs.has(`${targetId}→${sourceId}`);
+      const strength = Math.max(
+        0.18,
+        Math.min(0.96, 0.24 + Math.min(sharedNeighbors, 4) * 0.12 + sharedNeighborRatio * 0.24 + (isReciprocal ? 0.16 : 0))
+      );
+
+      this.linkInsightsById.set(link.id, {
+        sharedNeighbors,
+        sharedNeighborRatio,
+        isReciprocal,
+        strength,
+      });
+    }
+  }
+
+  private countSharedNeighbors(sourceId: string, targetId: string) {
+    const sourceNeighbors = this.neighborIdsById.get(sourceId) || new Set<string>();
+    const targetNeighbors = this.neighborIdsById.get(targetId) || new Set<string>();
+    const [smaller, larger] = sourceNeighbors.size <= targetNeighbors.size
+      ? [sourceNeighbors, targetNeighbors]
+      : [targetNeighbors, sourceNeighbors];
+
+    let count = 0;
+    smaller.forEach((neighborId) => {
+      if (neighborId === sourceId || neighborId === targetId) return;
+      if (larger.has(neighborId)) count += 1;
+    });
+    return count;
+  }
+
+  private getLinkInsight(d: Link): LinkInsight {
+    return this.linkInsightsById.get(d.id) || {
+      sharedNeighbors: 0,
+      sharedNeighborRatio: 0,
+      isReciprocal: false,
+      strength: 0.22,
+    };
   }
 
   private rebuildTreeCaches() {
@@ -885,6 +944,7 @@ export class GraphManager {
     this.focusNeighborIds = new Set();
     this.degreeById = new Map();
     this.neighborIdsById = new Map();
+    this.linkInsightsById = new Map();
     this.childrenByParent = new Map();
     this.hiddenNodeIds = new Set();
     this.forestTargets = new Map();
@@ -1248,6 +1308,7 @@ export class GraphManager {
     const isCrossLink = d.layoutRole === 'cross';
     const isForestPrimary = this.layoutMode === 'forest' && !isCrossLink;
     const isStructuredPrimary = this.isStructuredMapMode() && !isCrossLink;
+    const insight = this.getLinkInsight(d);
 
     const focusActive = this.focusNodeId !== null;
     const isIncidentToFocus = focusActive && (sourceId === this.focusNodeId || targetId === this.focusNodeId);
@@ -1269,8 +1330,8 @@ export class GraphManager {
       if (isForestPrimary && originSeed) {
         return this.hashColor(originSeed, 0.84, 0.66, Math.max(0, Math.min(12, originDepth)) * 8);
       }
-      if (isCrossLink) return 'rgba(186, 197, 214, 0.85)';
-      if (isBacklink) return '#ffb020';
+      if (isCrossLink) return insight.strength > 0.6 ? 'rgba(125, 211, 252, 0.88)' : 'rgba(186, 197, 214, 0.85)';
+      if (isBacklink) return insight.isReciprocal ? '#f6c453' : '#ffb020';
       if (originSeed) return this.hashColor(originSeed, 0.72, 0.62, Math.max(0, Math.min(12, originDepth)) * 10);
       return '#888';
     })();
@@ -1278,19 +1339,19 @@ export class GraphManager {
     const baseStrokeWidth = (() => {
       if (isDimmed) return 1;
       if (isPathLink) return 4;
-      if (isStructuredPrimary) return 3.2;
-      if (isForestPrimary) return 3.8;
-      if (isCrossLink) return 1.8;
-      return isBacklink ? 2 : 3;
+      if (isStructuredPrimary) return 3.1 + insight.strength * 1.1;
+      if (isForestPrimary) return 3.6 + insight.strength * 1.1;
+      if (isCrossLink) return 1.5 + insight.strength * 1.5;
+      return isBacklink ? 1.9 + insight.strength * 1.1 : 2.8 + insight.strength;
     })();
 
     const baseStrokeOpacity = (() => {
       if (isDimmed) return 0.12;
       if (isPathLink) return 0.85;
-      if (isStructuredPrimary) return 0.72;
-      if (isForestPrimary) return 0.9;
-      if (isCrossLink) return 0.28;
-      return isBacklink ? 0.5 : 0.6;
+      if (isStructuredPrimary) return Math.min(0.9, 0.62 + insight.strength * 0.2);
+      if (isForestPrimary) return Math.min(0.95, 0.76 + insight.strength * 0.18);
+      if (isCrossLink) return Math.min(0.54, 0.2 + insight.strength * 0.3);
+      return isBacklink ? Math.min(0.72, 0.42 + insight.strength * 0.22) : Math.min(0.78, 0.5 + insight.strength * 0.18);
     })();
 
     const stroke = (() => {

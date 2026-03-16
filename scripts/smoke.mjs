@@ -7,17 +7,26 @@ async function waitForNodeCount(page, minimumCount) {
     (count) => {
       const body = document.body.innerText;
       const match = body.match(/Nodes:\s*(\d+)/);
-      return match ? Number(match[1]) >= count : false;
+      if (match) return Number(match[1]) >= count;
+      return document.querySelectorAll('svg text').length >= count;
     },
     minimumCount,
     { timeout: 30000 }
   );
 }
 
+async function slowWikipediaRequests(page) {
+  await page.route(/https:\/\/en\.wikipedia\.org\/.*/, async (route) => {
+    await new Promise(resolve => setTimeout(resolve, 250));
+    await route.continue();
+  });
+}
+
 const browser = await chromium.launch({ headless: true });
 
 try {
   const page = await browser.newPage({ viewport: { width: 1365, height: 900 } });
+  await slowWikipediaRequests(page);
   await page.goto(baseUrl, { waitUntil: 'networkidle' });
 
   await page.getByRole('textbox', { name: 'Search a Wikipedia topic' }).fill('Physics');
@@ -30,18 +39,21 @@ try {
 
   await page.goto(baseUrl, { waitUntil: 'networkidle' });
   await page.getByRole('button', { name: /Run path/i }).first().click();
-  await page.getByRole('button', { name: 'ABORT' }).waitFor({ timeout: 15000 });
-  await page.getByRole('button', { name: 'ABORT' }).click();
-  await page.getByText('Search cancelled').waitFor({ timeout: 15000 });
+  await page.getByRole('button', { name: /stop/i }).waitFor({ timeout: 15000 });
+  await page.getByRole('button', { name: /stop/i }).click();
+  await page.getByRole('button', { name: /stop/i }).waitFor({ state: 'hidden', timeout: 15000 });
+  await waitForNodeCount(page, 2);
 
   const mobilePage = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true });
+  await slowWikipediaRequests(mobilePage);
   await mobilePage.goto(baseUrl, { waitUntil: 'networkidle' });
   await mobilePage.getByRole('button', { name: 'Open Ideas' }).click();
   await mobilePage.getByRole('button', { name: /Run path/i }).first().waitFor({ timeout: 15000 });
   await mobilePage.getByRole('button', { name: /Run path/i }).first().click();
-  await mobilePage.getByRole('button', { name: 'ABORT' }).waitFor({ timeout: 15000 });
-  await mobilePage.getByRole('button', { name: 'ABORT' }).click();
-  await mobilePage.getByText('Search cancelled').waitFor({ timeout: 15000 });
+  await mobilePage.getByRole('button', { name: /stop/i }).waitFor({ timeout: 15000 });
+  await mobilePage.getByRole('button', { name: /stop/i }).click();
+  await mobilePage.getByRole('button', { name: /stop/i }).waitFor({ state: 'hidden', timeout: 15000 });
+  await waitForNodeCount(mobilePage, 2);
 
   await page.close();
   await mobilePage.close();

@@ -164,7 +164,7 @@ export function SearchStatusOverlay(props: {
                 onClick={props.onCancelSearch}
                 className="flex-1 rounded-2xl border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs font-medium text-red-200 transition hover:bg-red-500/15"
               >
-                Abort
+                Stop Search
               </button>
             </div>
           </div>
@@ -249,7 +249,7 @@ export function SearchStatusOverlay(props: {
               onClick={props.onCancelSearch}
               className="flex-1 border border-red-900 bg-red-900/20 text-red-400 hover:bg-red-900/40 rounded px-2 py-1 text-center transition"
             >
-              ABORT
+              STOP
             </button>
           </div>
         </div>
