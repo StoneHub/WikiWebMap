@@ -12,6 +12,8 @@ dist
 dist-ssr
 .npm-cache/
 .npm-logs/
+.playwright-cli/
+.preview.*
 .env*
 !.env.example
 *.local

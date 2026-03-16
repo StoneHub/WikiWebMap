@@ -29,15 +29,16 @@ try {
   await page.getByRole('heading', { name: 'Physics' }).waitFor({ timeout: 15000 });
 
   await page.goto(baseUrl, { waitUntil: 'networkidle' });
-  await page.getByRole('button', { name: /→/ }).first().click();
+  await page.getByRole('button', { name: /Run path/i }).first().click();
   await page.getByRole('button', { name: 'ABORT' }).waitFor({ timeout: 15000 });
   await page.getByRole('button', { name: 'ABORT' }).click();
   await page.getByText('Search cancelled').waitFor({ timeout: 15000 });
 
   const mobilePage = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true });
   await mobilePage.goto(baseUrl, { waitUntil: 'networkidle' });
-  await mobilePage.getByText('Select In Details').waitFor({ timeout: 15000 });
-  await mobilePage.getByRole('button', { name: /→/ }).first().click();
+  await mobilePage.getByRole('button', { name: 'Open Ideas' }).click();
+  await mobilePage.getByRole('button', { name: /Run path/i }).first().waitFor({ timeout: 15000 });
+  await mobilePage.getByRole('button', { name: /Run path/i }).first().click();
   await mobilePage.getByRole('button', { name: 'ABORT' }).waitFor({ timeout: 15000 });
   await mobilePage.getByRole('button', { name: 'ABORT' }).click();
   await mobilePage.getByText('Search cancelled').waitFor({ timeout: 15000 });

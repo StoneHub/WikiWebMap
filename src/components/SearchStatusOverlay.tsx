@@ -327,7 +327,7 @@ export function SearchStatusOverlay(props: {
           <span>
             Path:{' '}
             <strong className="text-gray-200">
-              {props.isTouchDevice ? 'Select In Details' : 'Shift+Click'}
+              {props.isTouchDevice ? 'Select For Path' : 'Shift+Click'}
             </strong>
           </span>
           <span>
