@@ -21,6 +21,12 @@ Live: `https://wikiconnectionsmap.web.app/`
 ### Test
 - `npm run test`
 
+### Smoke Test
+- `npm install --no-save playwright`
+- `npx playwright install chromium`
+- `npm run preview -- --host 127.0.0.1 --port 4173`
+- `npm run smoke`
+
 ## Environment
 - Copy `.env.example` to `.env.local` for local overrides.
 - `VITE_WIKI_API_CONTACT_EMAIL` is used for the Wikipedia API identification header.

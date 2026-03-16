@@ -27,6 +27,45 @@ svg * {
   vector-effect: non-scaling-stroke;
 }
 
+.structured-flow {
+  background:
+    radial-gradient(circle at top left, rgba(34, 211, 238, 0.1), transparent 24%),
+    radial-gradient(circle at bottom right, rgba(245, 158, 11, 0.08), transparent 26%),
+    linear-gradient(180deg, rgba(15, 23, 42, 0.9), rgba(2, 6, 23, 0.98));
+}
+
+.structured-flow .react-flow__node {
+  background: transparent;
+  border: none;
+}
+
+.structured-flow .react-flow__edge-path {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.structured-flow .react-flow__controls {
+  overflow: hidden;
+}
+
+.structured-flow .react-flow__controls-button {
+  background: rgba(15, 23, 42, 0.92);
+  border-bottom: 1px solid rgba(51, 65, 85, 0.85);
+  color: #cbd5e1;
+}
+
+.structured-flow .react-flow__controls-button:hover {
+  background: rgba(30, 41, 59, 0.95);
+}
+
+.structured-flow .react-flow__panel {
+  pointer-events: none;
+}
+
+.structured-flow .react-flow__panel > * {
+  pointer-events: auto;
+}
+
 /* Hide reCAPTCHA badge - attribution is shown in footer per Google's TOS */
 .grecaptcha-badge {
   visibility: hidden !important;

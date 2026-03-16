@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useReducer } from 'react';
+import { useState, useEffect, useRef, useCallback, useReducer, type MouseEvent as ReactMouseEvent } from 'react';
 import { GraphManager, Node as GraphNode, Link } from './GraphManager';
 import { UpdateQueue } from './UpdateQueue';
 import { WikiService } from './WikiService';
@@ -9,6 +9,7 @@ import { NodeDetailsPanel } from './components/NodeDetailsPanel';
 import { SearchStatusOverlay } from './components/SearchStatusOverlay';
 import { LensingGridBackground } from './components/LensingGridBackground';
 import { ConnectionStatusBar } from './components/ConnectionStatusBar';
+import { StructuredFlowView } from './components/StructuredFlowView';
 import type { SearchProgress } from './types/SearchProgress';
 import { runPathfinder } from './features/pathfinding/runPathfinder';
 import { SUGGESTED_PATHS, type SuggestedPath } from './data/suggestedPaths';
@@ -158,7 +159,7 @@ const WikiWebExplorer = () => {
   // Visual settings
   const [layoutMode, setLayoutMode] = useState<LayoutMode>(() => {
     const stored = localStorage.getItem('wikiLayoutMode');
-    if (stored === 'web' || stored === 'forest') return stored;
+    if (stored === 'web' || stored === 'forest' || stored === 'structured') return stored;
     return getDefaultLayoutMode(import.meta.env.DEV);
   });
   const [nodeSpacing, setNodeSpacing] = useState(150);
@@ -378,6 +379,14 @@ const WikiWebExplorer = () => {
     refreshClickedNode();
   }, [clickedNode, graphManagerRef, pushHistory, refreshClickedNode]);
 
+  const clearFocusedNode = useCallback(() => {
+    graphManagerRef.current?.highlightNode(null);
+    setClickedNode(null);
+    setClickedSummary('');
+    setActiveLinkContexts(new Set());
+    setHoveredLinkId(null);
+  }, [graphManagerRef, setClickedNode, setClickedSummary]);
+
   const handleToggleBranchCollapse = useCallback(() => {
     if (!clickedNode || !graphManagerRef.current) return;
     pushHistory();
@@ -434,7 +443,7 @@ const WikiWebExplorer = () => {
     setError('');
   }, [setPathNodes, setPathSelectedNodes]);
 
-  const handleNodeClick = async (event: MouseEvent, d: GraphNode) => {
+  const openNodeDetails = useCallback(async (event: MouseEvent | ReactMouseEvent, d: GraphNode) => {
     if (event.defaultPrevented) return;
     event.stopPropagation();
 
@@ -466,14 +475,24 @@ const WikiWebExplorer = () => {
     }
     if (categories.length > 0) setNodeCategories(prev => ({ ...prev, [d.title]: categories }));
     if (includeBacklinks) setNodeBacklinkCounts(prev => ({ ...prev, [d.title]: backlinks.length }));
-  };
+  }, [
+    graphManagerRef,
+    includeBacklinks,
+    setClickedNode,
+    setClickedSummary,
+    setNodeBacklinkCounts,
+    setNodeCategories,
+    setNodeDescriptions,
+    setNodeThumbnails,
+    togglePathSelection,
+  ]);
 
   // Initialization
   useEffect(() => {
     if (!svgRef.current || graphManagerRef.current) return;
 
     graphManagerRef.current = new GraphManager(svgRef.current, {
-      onNodeClick: (node, event) => handleNodeClick(event as any, node),
+      onNodeClick: (node, event) => { void openNodeDetails(event as any, node); },
       onNodeDoubleClick: (node, event) => {
         event.stopPropagation();
         handleExpandNode(node.id);
@@ -492,10 +511,7 @@ const WikiWebExplorer = () => {
       onLinkHover: (link) => setHoveredLinkId(link.id),
       onLinkHoverEnd: (link) => setHoveredLinkId(prev => (prev === link.id ? null : prev)),
       onBackgroundClick: () => {
-        graphManagerRef.current?.highlightNode(null);
-        setClickedNode(null);
-        setActiveLinkContexts(new Set());
-        setHoveredLinkId(null);
+        clearFocusedNode();
       },
       onSelectionChange: (nodes) => setBulkSelectedNodes(nodes),
       onLinksApplied: ({ added, updated }) => {
@@ -867,11 +883,32 @@ const WikiWebExplorer = () => {
     return () => window.clearTimeout(handle);
   }, [displayedLinkId, pinnedState.selectedId, graphManagerRef]);
 
+  const structuredSnapshot = graphManagerRef.current?.getStateSnapshot() || null;
+
   return (
     <div className="w-screen h-screen bg-gray-900 text-white relative overflow-hidden font-sans">
       <div className="absolute inset-0 z-0">
         <LensingGridBackground graphManagerRef={graphManagerRef} layoutMode={layoutMode} />
-        <svg ref={svgRef} className="w-full h-full" />
+        <svg
+          ref={svgRef}
+          className={`w-full h-full transition-opacity duration-200 ${
+            layoutMode === 'structured' ? 'pointer-events-none opacity-0' : 'opacity-100'
+          }`}
+        />
+        {layoutMode === 'structured' && structuredSnapshot && (
+          <StructuredFlowView
+            snapshot={structuredSnapshot}
+            nodeDescriptions={nodeDescriptions}
+            clickedNodeId={clickedNode?.id || null}
+            pathSelectedNodeIds={new Set(pathSelectedNodes.map(node => node.id))}
+            showCrossLinks={showCrossLinks}
+            preferredRootOrder={Array.from(userTypedNodes)}
+            onNodeSelect={(node, event) => {
+              void openNodeDetails(event, node);
+            }}
+            onPaneClick={clearFocusedNode}
+          />
+        )}
       </div>
 
       <SearchOverlay
@@ -965,7 +1002,7 @@ const WikiWebExplorer = () => {
         isBranchCollapsed={Boolean(clickedNodeMeta?.isCollapsed)}
         isPathSelected={Boolean(clickedNode && pathSelectedNodes.some(node => node.id === clickedNode.id))}
         pathSelectionCount={pathSelectedNodes.length}
-        onClose={() => setClickedNode(null)}
+        onClose={clearFocusedNode}
         onExpand={handleExpandNode}
         onTogglePathSelection={() => {
           if (!clickedNode) return Promise.resolve();

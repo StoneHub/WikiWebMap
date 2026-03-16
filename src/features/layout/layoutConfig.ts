@@ -1,4 +1,4 @@
-export type LayoutMode = 'web' | 'forest';
+export type LayoutMode = 'web' | 'forest' | 'structured';
 
 export const DEFAULT_TREE_SPACING = 180;
 export const DEFAULT_BRANCH_SPREAD = 160;

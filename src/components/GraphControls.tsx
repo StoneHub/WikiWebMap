@@ -65,6 +65,7 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
     onOpenLogs,
 }) => {
     const [showLegend, setShowLegend] = useState(false);
+    const isStructuredView = layoutMode === 'structured';
     const mobileSheetClassName =
         'fixed inset-x-3 bottom-20 pointer-events-auto rounded-[1.75rem] border border-slate-700/70 bg-slate-900/94 p-4 shadow-[0_22px_60px_rgba(2,6,23,0.6)] backdrop-blur-xl max-h-[60vh] overflow-y-auto';
 
@@ -130,7 +131,7 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                         <span>Layout Mode</span>
                         <span className="uppercase tracking-[0.18em] text-[10px] text-cyan-200">{layoutMode}</span>
                     </div>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-3 gap-2">
                         <button
                             type="button"
                             onClick={() => setLayoutMode('forest')}
@@ -151,12 +152,25 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                         >
                             Web
                         </button>
+                        <button
+                            type="button"
+                            onClick={() => setLayoutMode('structured')}
+                            className={`rounded-xl border px-3 py-2 text-xs font-semibold transition ${layoutMode === 'structured'
+                                ? 'border-cyan-400/40 bg-cyan-400/12 text-cyan-100'
+                                : 'border-slate-700/70 bg-slate-900/50 text-slate-300 hover:border-cyan-400/20'
+                                }`}
+                        >
+                            Map
+                        </button>
                     </div>
                     <div className="mt-1 text-[10px] text-gray-500">
-                        Forest guides topics into branches. Web keeps the freer spider-map layout.
+                        {isStructuredView
+                            ? 'Map mode uses the new structured renderer with fixed lanes, stronger hierarchy, and lighter bridge links.'
+                            : 'Forest guides topics into branches. Web keeps the freer spider-map layout.'}
                     </div>
                 </div>
-                <div>
+                {!isStructuredView && (
+                    <div>
                     <div className="flex justify-between text-xs text-gray-400 mb-1">
                         <span>Spacing</span>
                         <span>{nodeSpacing}px</span>
@@ -169,8 +183,10 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                         onChange={(e) => setNodeSpacing(Number(e.target.value))}
                         className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
                     />
-                </div>
-                <div>
+                    </div>
+                )}
+                {!isStructuredView && (
+                    <div>
                     <div className="flex justify-between text-xs text-gray-400 mb-1">
                         <span>Tree Spacing</span>
                         <span>{treeSpacing}px</span>
@@ -186,8 +202,10 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                     <div className="mt-1 text-[10px] text-gray-500">
                         Controls the vertical growth distance between branch levels in forest mode.
                     </div>
-                </div>
-                <div>
+                    </div>
+                )}
+                {!isStructuredView && (
+                    <div>
                     <div className="flex justify-between text-xs text-gray-400 mb-1">
                         <span>Branch Spread</span>
                         <span>{branchSpread}px</span>
@@ -203,7 +221,8 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                     <div className="mt-1 text-[10px] text-gray-500">
                         Widens or tightens sibling branches in forest mode.
                     </div>
-                </div>
+                    </div>
+                )}
                 <div>
                     <div className="flex justify-between text-xs text-gray-400 mb-1">
                         <span>Recursion Depth</span>
@@ -221,7 +240,8 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                         Effective max depth: {recursionDepth * 2} (capped at 6).
                     </div>
                 </div>
-                <div>
+                {!isStructuredView && (
+                    <div>
                     <div className="flex justify-between text-xs text-gray-400 mb-1">
                         <span>Node Size</span>
                         <span>{Math.round(nodeSizeScale * 100)}%</span>
@@ -235,7 +255,8 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                         onChange={(e) => setNodeSizeScale(Number(e.target.value))}
                         className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
                     />
-                </div>
+                    </div>
+                )}
                 <div>
                     <div className="flex justify-between text-xs text-gray-400 mb-1">
                         <span>Link Visibility</span>
@@ -249,9 +270,16 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
                         Show cross-tree links
                     </label>
                     <div className="mt-1 text-[10px] text-gray-500">
-                        Keeps secondary links between trees visible while forest branches stay readable.
+                        {isStructuredView
+                            ? 'Controls whether dashed bridge edges between branches remain visible in the structured renderer.'
+                            : 'Keeps secondary links between trees visible while forest branches stay readable.'}
                     </div>
                 </div>
+                {isStructuredView && (
+                    <div className="rounded-2xl border border-cyan-400/20 bg-cyan-400/6 px-3 py-2 text-[11px] leading-relaxed text-cyan-50">
+                        Structured View is a read-only beta renderer for now. It shares topic search, path selection, and the details panel with the main graph while we prove the new visual language.
+                    </div>
+                )}
                 <div>
                     <div className="flex justify-between text-xs text-gray-400 mb-1">
                         <span>Discovery</span>

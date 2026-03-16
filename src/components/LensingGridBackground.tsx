@@ -51,6 +51,7 @@ export function LensingGridBackground(props: {
   const rafRef = useRef<number | null>(null);
 
   useEffect(() => {
+    if (props.layoutMode === 'structured') return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -153,6 +154,10 @@ export function LensingGridBackground(props: {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
   }, [props.graphManagerRef, props.layoutMode]);
+
+  if (props.layoutMode === 'structured') {
+    return null;
+  }
 
   const modeOpacity = props.layoutMode === 'forest' ? 0.26 : 0.35;
   const opacity = Math.min(0.9, Math.max(0.16, modeOpacity + EFFECT_INTENSITY * (props.layoutMode === 'forest' ? 0.26 : 0.55)));

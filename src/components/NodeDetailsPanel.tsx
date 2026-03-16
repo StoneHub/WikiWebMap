@@ -110,9 +110,13 @@ export const NodeDetailsPanel: React.FC<NodeDetailsPanelProps> = ({
                                             {clickedDescription}
                                         </span>
                                     )}
-                                    {layoutMode === 'forest' && (
+                                    {layoutMode !== 'web' && (
                                         <span className="px-2.5 py-1 rounded-full bg-cyan-500/10 border border-cyan-400/20 text-cyan-100">
-                                            {isPinned ? 'Pinned' : 'Tree-guided'}
+                                            {layoutMode === 'structured'
+                                                ? 'Structured View'
+                                                : isPinned
+                                                    ? 'Pinned'
+                                                    : 'Tree-guided'}
                                         </span>
                                     )}
                                     {typeof clickedBacklinkCount === 'number' && (
