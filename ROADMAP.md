@@ -16,8 +16,10 @@ This project is moving toward an imperative D3 `GraphManager` + React UI shell. 
 - [ ] Bulk deletion UX (drag-to-trash removed to avoid accidental deletes; revisit safer multi-select delete options)
 
 ### Data Visualization Planning
-- [ ] Brainstorm graph types and data sources
-- [ ] Proposal for "spawnable" graphs
+- [~] Brainstorm graph types and alternate renderers
+- [ ] Prototype a React Flow-based structured view for a more radically different map mode
+- [ ] Define "spawnable" graph/view presets and the data they need
+- [ ] Defer "Cosmos mode" to a future VR integration instead of the main web app
 
 ### Auto-Test Reliability
 - [~] Replace “Facebook -> Typo” auto-test with deterministic path (now seeds `Physics` + `Science`)
@@ -37,9 +39,9 @@ This project is moving toward an imperative D3 `GraphManager` + React UI shell. 
 1. Add trash UI + bulk delete (button + drop-zone affordance), and keep selection visualization in sync.
 2. Polish bulk selection UX (selection modifier keys, clear selection, avoid conflicts with path endpoint selection).
 3. Add “Viewed” state and styling (clicked/read), differentiating from “Expanded”.
-4. Data visualization planning: define "spawnable graph" formats + data sources.
-5. Improve auto-test further (optional "Kevin Bacon" → "Hollywood", reduce timing/polling).
-6. Fix local build tooling (`vite build` currently fails due to Rollup optional dependency install).
+4. Prototype the first radically different renderer using React Flow as a structured alternate view.
+5. Define "spawnable graph" formats + data sources around that renderer experiment.
+6. Improve auto-test further (optional "Kevin Bacon" → "Hollywood", reduce timing/polling).
 
 ### Smarter Connection Discovery (ideas backlog)
 - Use entity extraction on summaries/sections to add unlinked mentions as low-confidence candidate nodes; resolve via `resolveTitle`.
