@@ -10,6 +10,9 @@ This repo is now in a safer release-ready state than it was at clone time:
 - The repo now has unit coverage for `WikiService`, `runPathfinder`, and `useGraphState` reset/restore behavior.
 - Session diagnostics now include both connection logs and captured client runtime errors.
 
+Renderer planning note:
+- The next radically different visualization experiment is a React Flow-based `Structured View`; see `docs/react-flow-structured-view-plan.md`.
+
 ## Recommended phase order
 
 ### Phase 1: Release the current hardening work
@@ -84,6 +87,21 @@ Changes:
 - More polished mobile drawers/sheets
 - Optional remote error reporting
 - Better release notes and rollback discipline
+
+### Phase 6: Structured renderer experiment
+Goals:
+- Test a genuinely different alternate renderer without replacing the current graph.
+
+Changes:
+- Add a React Flow-based `Structured View` fed by existing graph/search state.
+- Emphasize branches, paths, and hierarchy over force-directed motion.
+- Keep `Cosmos mode` deferred to a later VR-oriented track.
+
+Recommended order:
+1. Read-only React Flow spike
+2. Deterministic structured layout
+3. Selection/details sync
+4. Branch collapse and manual organization
 
 ## Prioritized backlog
 
